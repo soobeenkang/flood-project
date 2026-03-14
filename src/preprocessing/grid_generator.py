@@ -40,11 +40,15 @@ def generate_gangnam_grid():
 
     grid = gpd.GeoDataFrame(geometry=grid_cells, crs="EPSG:5179")
 
+    # calculate centroid in meter
+    centroids = grid.centroid
+
     # 위경도로 변환
     grid = grid.to_crs(epsg=4326)
 
-    # centroid
-    centroids = grid.centroid
+    # centroid도 위경도로 변환
+    centroids = gpd.GeoSeries(centroids, crs="EPSG:5179").to_crs(epsg=4326)
+
     grid["lon"] = centroids.x
     grid["lat"] = centroids.y
     
