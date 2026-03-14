@@ -10,8 +10,6 @@ def generate_gangnam_grid():
 
     print("시군구 데이터 로드 중...")
     gdf = gpd.read_file(shp_path)
-
-    print(gdf.columns)
     
     # 강남구 추출
     gangnam = gdf[gdf["SIGUNGU_NM"] == "강남구"]
@@ -42,18 +40,16 @@ def generate_gangnam_grid():
 
     grid = gpd.GeoDataFrame(geometry=grid_cells, crs="EPSG:5179")
 
-    # centroid
-    centroids = grid.centroid
-    grid["x"] = centroids.x
-    grid["y"] = centroids.y
-
     # 위경도로 변환
     grid = grid.to_crs(epsg=4326)
 
     # centroid
-    centroids_ll = grid.centroid
-    grid["lon"] = centroids_ll.x
-    grid["lat"] = centroids_ll.y
+    centroids = grid.centroid
+    grid["lon"] = centroids.x
+    grid["lat"] = centroids.y
+    
+    # grid id
+    grid["grid_id"] = range(len(grid))
 
     print("grid 개수:", len(grid))
 
