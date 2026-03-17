@@ -88,7 +88,7 @@ def parse_grid_response(text: str) -> list:
 
 
 BASE_URL = "https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-dfs_vsrt_grd"
-AUTH_KEY  = "ifiJr1_nREy4ia9f5wRMYA"
+AUTH_KEY  = ""
 
 SKY_CODE = {1: "맑음", 3: "구름많음", 4: "흐림"}
 PTY_CODE = {0: "없음", 1: "비", 2: "비/눈", 3: "눈", 5: "빗방울", 6: "빗방울눈날림", 7: "눈날림"}
