@@ -63,6 +63,7 @@ def attach_grid_and_save(rows):
     print("OUTPUT_PATH:", OUTPUT_PATH)
 
     api_df = pd.DataFrame(rows)
+
     grid_map_df = pd.read_csv(GRID_MAP_PATH)
 
     api_df["sensor_id"] = api_df["sensor_id"].astype(str).str.strip()
@@ -80,7 +81,15 @@ def attach_grid_and_save(rows):
         print(unmatched[["sensor_id", "location"]].drop_duplicates())
 
     result = merged[["time", "grid_id", "water_level"]].copy()
+    result = result.dropna(subset=["grid_id"])
     result["grid_id"] = result["grid_id"].astype("Int64")
+    result["water_level"] = pd.to_numeric(result["water_level"], errors="coerce")
+
+    # 같은 grid 안에서 최대 수위만 사용
+    result = (
+        result.groupby(["time", "grid_id"], as_index=False)["water_level"]
+        .max()
+    )
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -124,7 +133,7 @@ def run_polling(api_key, interval_seconds=10):
         time.sleep(interval_seconds)
 
 
-API_KEY = "api key"
+API_KEY = "6a4776656f75796e3633685964504d"
 run_polling(API_KEY, interval_seconds=300)
 
 
