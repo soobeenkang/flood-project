@@ -133,7 +133,7 @@ def run_polling(api_key, interval_seconds=10):
         time.sleep(interval_seconds)
 
 
-API_KEY = "6a4776656f75796e3633685964504d"
+API_KEY = "api key"
 run_polling(API_KEY, interval_seconds=300)
 
 
