@@ -47,7 +47,7 @@ def generate_gangnam_grid_with_elevation():
         crs="EPSG:5186"   #수치지형도 데이터 좌표계
     )
 
-    #그리드와 좌표계 통일
+    #좌표계 통일
     points_gdf = points_gdf.to_crs(epsg=5179)
    
     #spatial join
@@ -62,7 +62,7 @@ def generate_gangnam_grid_with_elevation():
 
     print("매핑된 포인트 수:", len(joined))
 
-    # grid별 평균 고도 계산
+    # grid별 평균값 계산
     # 나중에 보수적으로 바꾸고싶다면 낮은 값 넣기로 변경 가능
     elevation_per_grid = (
         joined.groupby("grid_id")["elevation"]
