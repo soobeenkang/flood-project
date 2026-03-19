@@ -76,7 +76,7 @@ def gangnam_flood_data():
     total_flood_gdf = pd.concat(all_data, ignore_index=True)
     total_flood_gdf = total_flood_gdf.apply(process_flood_dates, axis=1)
     total_flood_gdf=total_flood_gdf.drop(columns=['피해위치(','피해일시'])
-    # print(total_flood_gdf.columns)
+
     os.makedirs("data/flood", exist_ok=True)
     output_path = "data/flood/gangnam_flood_data.geojson"
     total_flood_gdf.to_file(output_path, driver="GeoJSON")
