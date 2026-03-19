@@ -37,6 +37,10 @@ def preprocess():
 
     df["time"] = pd.to_datetime(df["time"])
 
+    # 5-10월로 데이터 제한
+    df["month"] = df["time"].dt.month
+    df = df[df["month"].between(5,10)]
+
     df = df[df["station"].isin(STATIONS)]
 
     df = df.sort_values(["station","time"])
@@ -45,7 +49,7 @@ def preprocess():
 
     df.to_csv("data/prev_rainfall/aws_hourly_raw.csv",index=False)
 
-    print("AWS raw rainfal  생성 완료")
+    print("AWS raw rainfall  생성 완료")
 
 
 if __name__ == "__main__":

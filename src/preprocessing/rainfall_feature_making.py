@@ -8,14 +8,30 @@ def create_rain_features():
 
     df["time"] = pd.to_datetime(df["time"])
 
-    df = df.sort_values(["station","time"])
+    df = df.sort_values(["station","time"]).reset_index(drop=True)
 
-    df["rain_3h"] = df.groupby("station")["rain_1h"].rolling(3).sum().reset_index(0,drop=True)
-    df["rain_6h"] = df.groupby("station")["rain_1h"].rolling(6).sum().reset_index(0,drop=True)
-    df["rain_12h"] = df.groupby("station")["rain_1h"].rolling(12).sum().reset_index(0,drop=True)
-    df["rain_24h"] = df.groupby("station")["rain_1h"].rolling(24).sum().reset_index(0,drop=True)
-    df["rain_intensity"] = df.groupby("station")["rain_1h"].rolling(3).mean().reset_index(0,drop=True)
-    df["rain_max_3h"] = df.groupby("station")["rain_1h"].rolling(3).max().reset_index(0,drop=True)
+    df = df.set_index("time")
+
+    df["rain_3h"] = df.groupby("station")["rain_1h"].transform(
+        lambda x: x.rolling("3h", min_periods=1).sum()
+    )
+    df["rain_6h"] = df.groupby("station")["rain_1h"].transform(
+        lambda x: x.rolling("6h", min_periods=1).sum()
+    )
+    df["rain_12h"] = df.groupby("station")["rain_1h"].transform(
+        lambda x: x.rolling("12h", min_periods=1).sum()
+    )
+    df["rain_24h"] = df.groupby("station")["rain_1h"].transform(
+        lambda x: x.rolling("12h", min_periods=1).sum()
+    )
+    df["rain_intensity"] = df.groupby("station")["rain_1h"].transform(
+        lambda x: x.rolling("3h", min_periods=1).mean()
+    )
+    df["rain_max_3h"] = df.groupby("station")["rain_1h"].transform(
+        lambda x: x.rolling("3h", min_periods=1).max()
+    )
+
+    df = df.reset_index()
 
     df.to_csv("data/prev_rainfall/aws_rainfall_features.csv", index=False)
 
