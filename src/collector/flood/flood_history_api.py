@@ -13,17 +13,20 @@ def geo_flood():
         print("불일치")
         flood_gdf = flood_gdf.to_crs(grid_gdf.crs)
 
-    #공간 결합
+    #공간 결합 침수 위치가 어떤 grid에 포함되는지
     joined= gpd.sjoin(
         flood_gdf,
         grid_gdf[['grid_id','geometry']],
-        how='inner',
-        predicate='intersects'
+        how='inner', 
+        predicate='intersects' 
     )
+    
+    joined_dedup = joined.drop_duplicates(subset=['grid_id', 'SAT_DATE', 'END_DATE', 'DEPTH'])
+    print("그리드ID별로 시작,끝,깊이 같은 중복값 제거 완료")
 
     #grid_id별로 그룹화해서 침수발생연도개수(FLOOD_FREQ)+가장깊은수심(DEPTH) 통계냄
     print("날짜 및 그리드별 데이터 집계 중")
-    grid_history = joined.groupby('grid_id').agg({
+    grid_history = joined_dedup.groupby('grid_id').agg({
         'SAT_DATE': lambda x: ', '.join(x.dropna().astype(str)),
         'END_DATE': lambda x: ', '.join(x.dropna().astype(str)),
         'DEPTH': lambda x: ', '.join(x.dropna().astype(str)),
@@ -37,6 +40,7 @@ def geo_flood():
     }, inplace=True)
     grid_history['IS_FLOODED']=1
 
+    # 모든 grid 유지하면서 침수 정보 있는 grid만 값 채움
     final_grid = grid_gdf.merge(grid_history,on='grid_id',how='left')
 
     final_grid['FLOOD_COUNT'] = final_grid['FLOOD_COUNT'].fillna(0).astype(int)
@@ -52,10 +56,6 @@ def geo_flood():
     output_path = "data/flood/gangnam_final_flood_grid.geojson"
 
     final_grid.to_file(output_path, driver="GeoJSON")
-    # .to_file('gangnam_final_flood_grid.geojson',driver='GeoJSON')
-
-    # 데이터 분석용 csv (도형 정보 제외)
-    # final_grid.drop(columns='geometry').to_csv('gangnam_final_flood_grid.csv',index=False,encoding='utf-8-sig')
 
 if __name__ =="__main__":
     geo_flood()
