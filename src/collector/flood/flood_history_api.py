@@ -53,9 +53,9 @@ def geo_flood():
 
     os.makedirs("data/grid", exist_ok=True)
 
-    output_path = "data/flood/gangnam_final_flood_grid.geojson"
-
-    final_grid.to_file(output_path, driver="GeoJSON")
+    output_path = "data/flood/gangnam_final_flood_grid.parquet"
+    final_grid.to_parquet(output_path, engine='pyarrow')
+    # final_grid.to_file(output_path, driver="GeoJSON")
 
 if __name__ =="__main__":
     geo_flood()
