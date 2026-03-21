@@ -53,7 +53,7 @@ def get_gangnam_drainpipe_data(api_key):
 
     return result
 
-# 수집한 센서 데이터에 grid_id를 매핑하고 CSV 파일로 저장
+# 수집한 센서 데이터에 grid_id를 매핑하고 parquet 파일로 저장
 def attach_grid_and_save(rows):
     if not rows:
         print("저장할 새 row 없음")
@@ -63,7 +63,6 @@ def attach_grid_and_save(rows):
     print("OUTPUT_PATH:", OUTPUT_PATH)
 
     api_df = pd.DataFrame(rows)
-
     grid_map_df = pd.read_csv(GRID_MAP_PATH)
 
     api_df["sensor_id"] = api_df["sensor_id"].astype(str).str.strip()
@@ -81,11 +80,16 @@ def attach_grid_and_save(rows):
         print(unmatched[["sensor_id", "location"]].drop_duplicates())
 
     result = merged[["time", "grid_id", "water_level"]].copy()
+
+    # 타입 정리
     result = result.dropna(subset=["grid_id"])
     result["grid_id"] = result["grid_id"].astype("Int64")
-    result["water_level"] = pd.to_numeric(result["water_level"], errors="coerce")
+    result["water_level"] = pd.to_numeric(result["water_level"], errors="coerce").astype("float32")
+    result["time"] = pd.to_datetime(result["time"], errors="coerce").dt.floor("h")
 
-    # 같은 grid 안에서 최대 수위만 사용
+    result = result.dropna(subset=["time", "water_level"])
+
+    # 같은 시간 + grid 최대값
     result = (
         result.groupby(["time", "grid_id"], as_index=False)["water_level"]
         .max()
@@ -93,16 +97,21 @@ def attach_grid_and_save(rows):
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    file_exists = OUTPUT_PATH.exists()
-    result.to_csv(
-        OUTPUT_PATH,
-        mode="a",
-        header=not file_exists,
-        index=False,
-        encoding="utf-8-sig"
-    )
+    parquet_path = OUTPUT_PATH.with_suffix(".parquet")
 
-    print("파일 저장 완료:", OUTPUT_PATH)
+    # 기존 파일 있으면 concat
+    if parquet_path.exists():
+        existing = pd.read_parquet(parquet_path)
+        result = pd.concat([existing, result], ignore_index=True)
+
+        # 중복 제거
+        result = result.sort_values(["time", "grid_id"])
+        result = result.drop_duplicates(["time", "grid_id"], keep="last")
+
+    # 저장
+    result.to_parquet(parquet_path, index=False)
+
+    print("Parquet 저장 완료:", parquet_path)
 
     return result
 

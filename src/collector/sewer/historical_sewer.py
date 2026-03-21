@@ -130,7 +130,7 @@ def filter_gangnam(df: pd.DataFrame) -> pd.DataFrame:
 def clean_types(df: pd.DataFrame, year: int) -> pd.DataFrame:
     df["msrmt_watl"] = pd.to_numeric(df["msrmt_watl"], errors="coerce")
 
-    # 구형 데이터(2012~2018)는 예: 01-MAY-12 00:00:00
+    # 구형 데이터(2012~2018)
     if year <= 2018:
         df["msrmt_ymd"] = pd.to_datetime(
             df["msrmt_ymd"].astype(str).str.strip(),
@@ -225,6 +225,7 @@ def attach_grid_and_transform(df: pd.DataFrame, grid_map_path: str) -> pd.DataFr
     # 타입 정리
     result["grid_id"] = result["grid_id"].astype("Int64")
     result["water_level"] = pd.to_numeric(result["water_level"], errors="coerce")
+    result["water_level"] = result["water_level"].astype("float32")
 
     # 이상값 제거
     result = result.dropna(subset=["water_level"])
