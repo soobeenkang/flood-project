@@ -144,18 +144,3 @@ def run_polling(api_key, interval_seconds=10):
 
 API_KEY = "api key"
 run_polling(API_KEY, interval_seconds=300)
-
-
-"""
-센서 위치 뽑는 디버깅 코드
-data = get_gangnam_drainpipe_data(API_KEY)
-
-import pandas as pd
-api_df = pd.DataFrame(data)
-
-sensor_meta = api_df[["sensor_id", "location"]].drop_duplicates().sort_values("sensor_id")
-print(sensor_meta)
-
-sensor_meta.to_csv("gangnam_sensor_list.csv", index=False, encoding="utf-8-sig")
-print("저장 완료: gangnam_sensor_list.csv")
-"""
