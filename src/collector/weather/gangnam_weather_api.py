@@ -1,11 +1,12 @@
 import requests
-import csv
 import json
 import os
 from collections import defaultdict
 from datetime import datetime, timedelta
 import math
 import time
+
+import pandas as pd
 
 
 # 위경도 → 기상청 격자 변환
@@ -60,7 +61,7 @@ def build_kma_to_grid_map(geojson_path: str) -> dict:
 NX_TOTAL = 149
 NY_TOTAL = 253
 
-# 현재 파일 위치에 geojason
+# geojason 파일 경로(일단은 현재파일위치로)
 SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
 GEOJSON_PATH = os.path.join(SCRIPT_DIR, "gangnam_grid.geojson")
 
@@ -163,54 +164,59 @@ def main():
             time.sleep(0.3)
         kma_rain[(nx, ny)] = rn1_values
 
-    # CSV 저장
-    csv_path    = os.path.join(SCRIPT_DIR, "gangnam_rain.csv")
-    file_exists = os.path.isfile(csv_path)
+    # 행 리스트로 각 기상청 격자에 속하는 그리드마다 해당 격자의 강수량 기록
+    rows = []
+    for (nx, ny), grid_ids in KMA_TO_GRID_MAP.items():
+        rn1_values = kma_rain[(nx,ny)]
+        current_rain = rn1_values[0]
+        acc_1h = safe_sum(rn1_values[:1])
+        acc_3h = safe_sum(rn1_values[:3])
+        acc_6h = safe_sum(rn1_values[:6])
 
-    fieldnames = [
-        "grid_id",
-        "timestamp",
-        "current_rain_mm",
-        "acc_1h_mm",
-        "acc_3h_mm",
-        "acc_6h_mm",
-        "future_rain_1h",
-        "future_rain_2h",
-        "future_rain_3h",
-        "future_rain_4h",
-        "future_rain_5h",
-        "future_rain_6h",
-    ]
+        for grid_id in grid_ids:
+            rows.append({
+                "grid_id":          grid_id,
+                "timestamp":        timestamp,
+                "current_rain_mm":  current_rain,
+                "acc_1h_mm":        acc_1h,
+                "acc_3h_mm":        acc_3h,
+                "acc_6h_mm":        acc_6h,
+                "future_rain_1h":   rn1_values[0],
+                "future_rain_2h":   rn1_values[1],
+                "future_rain_3h":   rn1_values[2],
+                "future_rain_4h":   rn1_values[3],
+                "future_rain_5h":   rn1_values[4],
+                "future_rain_6h":   rn1_values[5],
+            })
 
-    with open(csv_path, mode="a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if not file_exists:
-            writer.writeheader()
+    # 실행데이터 데이터프레임 생성
+    df_new = pd.DataFrame(rows).astype({
+        "grid_id":          "int32",
+        "current_rain_mm":  "float32",
+        "acc_1h_mm":        "float32",
+        "acc_3h_mm":        "float32",
+        "acc_6h_mm":        "float32",
+        "future_rain_1h":   "float32",
+        "future_rain_2h":   "float32",
+        "future_rain_3h":   "float32",
+        "future_rain_4h":   "float32",
+        "future_rain_5h":   "float32",
+        "future_rain_6h":   "float32",
+    })
+    df_new["timestamp"] = pd.to_datetime(df_new["timestamp"])
 
-        # 각 기상청 격자에 속하는 그리드마다 해당 격자의 강수량 기록
-        for (nx, ny), grid_ids in KMA_TO_GRID_MAP.items():
-            rn1_values = kma_rain[(nx, ny)]
-            current_rain = rn1_values[0]
-            acc_1h = safe_sum(rn1_values[:1])
-            acc_3h = safe_sum(rn1_values[:3])
-            acc_6h = safe_sum(rn1_values[:6])
+    # 파켓 저장, 기존 파일 있으면 읽고 합치고 다시저장
+    parquet_path = os.path.join(SCRIPT_DIR, "gangnam_rain.parquet")
+    if os.path.isfile(parquet_path):
+        df_existing = pd.read_parquet(parquet_path)
+        df_all = pd.concat([df_existing, df_new], ignore_index=True)
+    else:
+        df_all = df_new
 
-            for grid_id in grid_ids:
-                writer.writerow({
-                    "grid_id":         grid_id,
-                    "timestamp":       timestamp,
-                    "current_rain_mm": current_rain,
-                    "acc_1h_mm":       acc_1h,
-                    "acc_3h_mm":       acc_3h,
-                    "acc_6h_mm":       acc_6h,
-                    "future_rain_1h":  rn1_values[0],
-                    "future_rain_2h":  rn1_values[1],
-                    "future_rain_3h":  rn1_values[2],
-                    "future_rain_4h":  rn1_values[3],
-                    "future_rain_5h":  rn1_values[4],
-                    "future_rain_6h":  rn1_values[5],
-                })
+    df_all.to_parquet(parquet_path, index=False)
+    print(f"저장 완료: {parquet_path} ({len(df_all):,}행)")
 
 
 if __name__ == "__main__":
     main()
+
