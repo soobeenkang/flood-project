@@ -99,7 +99,11 @@ def parse_grid_response(text: str) -> list:
 
 
 BASE_URL = "https://apihub.kma.go.kr/api/typ01/cgi-bin/url/nph-dfs_vsrt_grd"
-AUTH_KEY  = ""
+AUTH_KEY  = "ifiJr1_nREy4ia9f5wRMYA"
+
+TIMEOUT = 60    # 초
+MAX_RETRIES = 3 # 최대 재시도 횟수
+RETRY_WAIT = 5  # 재시도 대기 시간(초)
 
 
 # 특정 격자 값 가져오기
@@ -111,25 +115,32 @@ def fetch_value(tmfc: str, tmef: str, var: str, nx: int, ny: int) -> float | Non
         "vars":    var,
         "authKey": AUTH_KEY,
     }
-    try:
-        resp = requests.get(BASE_URL, params=params, timeout=15)
-        resp.raise_for_status()
-        values = parse_grid_response(resp.text)
 
-        total = NX_TOTAL * NY_TOTAL  # 37,697
-        if len(values) < total:
-            print(f"  [경고] NX={nx} NY={ny} {var} {tmef}: 값 개수 부족 ({len(values)}/{total})")
-            if target_idx < len(values):
-                val = values[target_idx] 
-                return None if val <= -99.0 else val
-            return None
+    for attempt in range(1, MAX_RETRIES + 1):
+        
+        try:
+            resp = requests.get(BASE_URL, params=params, timeout=15)
+            resp.raise_for_status()
+            values = parse_grid_response(resp.text)
 
-        val = values[target_idx]
-        return None if val <= -99.0 else val
+            total = NX_TOTAL * NY_TOTAL  # 37,697
+            if len(values) < total:
+                print(f"  [경고] NX={nx} NY={ny} {var} {tmef}: 값 개수 부족 ({len(values)}/{total})")
+                if target_idx < len(values):
+                    val = values[target_idx] 
+                    return None if val <= -99.0 else val
+                return None
 
-    except requests.RequestException as e:
-        print(f"  [오류] NX={nx} NY={ny} {var} {tmef}: {e}")
-        return None
+            val = values[target_idx]
+            return None if val <= -99.0 else val
+
+        except requests.RequestException as e:
+            print(f"  [오류] NX={nx} NY={ny} {var} {tmef} (시도 {attempt}/{MAX_RETRIES}): {e}")
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_WAIT)
+
+    print(f"    [실패] NX={nx} NY={ny} {var} {tmef}: {MAX_RETRIES}회 재시도 후 포기")
+    return None
 
 
 # 누적 계산용
