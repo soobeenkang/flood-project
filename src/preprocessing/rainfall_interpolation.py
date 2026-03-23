@@ -75,11 +75,40 @@ def generate_grid_rain_parquet():
     rain["time"] = pd.to_datetime(rain["time"])
     rain = rain.fillna(0)
 
+    """
+        학습 데이터 셋에서 사용하는 데이터만 rain_filtered로 추출
+    """
+    # 침수 발생 시간대
+    flood = pd.read_parquet("data/final/gangnam_final_flood_grid.parquet")
+    flood["SAT_DATE"] = pd.to_datetime(flood["SAT_DATE"])
+    flood["END_DATE"] = pd.to_datetime(flood["END_DATE"])
+    flood["END_DATE"] = flood["END_DATE"].fillna(
+        flood["SAT_DATE"].dt.normalize() + pd.Timedelta(days=1)
+    )
+
+    flood_hours = set()
+    for _, row in flood[flood["IS_FLOODDED"] == 1].itertuples(index=False):
+        hours = pd.date_range(row.SAT_DATE.floor("h"), row.END_DATE.floor("h"), freq="h")
+        flood_hours.update(hours)
+
+    # 강수 0 초과 시간대
+    rain_hours = set(rain[rain["rain_1h"] > 0]["time"].unique())
+
+    # 강수 침수 합
+    valid_times = flood_hours | rain_hours
+    rain_filtered = rain[rain["time"].isin(valid_times)]
+
+    print(f"전체 시간대:    {rain['time'].nunique()}")
+    print(f"필터링 후:      {rain_filtered['time'].nunique()}")
+    """
+        추출 끝
+    """
+
     grid_points = grid[["lon","lat"]].values.astype(np.float64)
 
     os.makedirs("data/tmp_parquet", exist_ok=True)
 
-    for i, (t, rain_now) in enumerate(rain.groupby("time")):
+    for i, (t, rain_now) in enumerate(rain_filtered.groupby("time")):
  
         print(f"{i}번째 시간 처리중: {t}")
 
