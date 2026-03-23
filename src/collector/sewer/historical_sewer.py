@@ -158,7 +158,7 @@ def load_zip_file(zip_path: str) -> pd.DataFrame:
             lower_name = name.lower()
 
             if lower_name.endswith(".csv") and not name.endswith("/"):
-                print(f"읽는 중: {zip_path} -> {name}")
+                #print(f"읽는 중: {zip_path} -> {name}")
 
                 with z.open(name) as f:
                     try:
@@ -175,8 +175,7 @@ def load_zip_file(zip_path: str) -> pd.DataFrame:
 
                         print("원본 행 수:", len(df))
 
-                        print(df[["unq_no", "se_cd", "se_nm", "msrmt_ymd", "msrmt_watl"]].head())
-
+                        # print(df[["unq_no", "se_cd", "se_nm", "msrmt_ymd", "msrmt_watl"]].head())
                         df = filter_gangnam(df)
                         print("강남 필터 후 행 수:", len(df))
 
