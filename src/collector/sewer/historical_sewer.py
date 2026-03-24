@@ -47,6 +47,21 @@ COLUMN_MAP = {
     "위치정보": "pstn_info",
 }
 
+def read_csv_fast(file_obj, **kwargs) -> pd.DataFrame:
+    try:
+        file_obj.seek(0)
+        return pd.read_csv(file_obj, engine="c", encoding="utf-8", **kwargs)
+    except UnicodeDecodeError:
+        file_obj.seek(0)
+        try:
+            return pd.read_csv(file_obj, engine="c", encoding="cp949", **kwargs)
+        except Exception:
+            file_obj.seek(0)
+            return pd.read_csv(file_obj, engine="python", encoding="cp949", **kwargs)
+    except Exception:
+        file_obj.seek(0)
+        return pd.read_csv(file_obj, engine="python", encoding="cp949", **kwargs)
+
 
 def standardize_columns(df: pd.DataFrame, source_file: str) -> pd.DataFrame:
     df = df.rename(columns={c: COLUMN_MAP[c] for c in df.columns if c in COLUMN_MAP})
@@ -71,25 +86,12 @@ def read_old_csv_file(file_obj, source_file: str) -> pd.DataFrame:
         "sgn_stts",
     ]
 
-    try:
-        df = pd.read_csv(
-            file_obj,
-            header=None,
-            names=old_cols,
-            encoding="utf-8",
-            engine="python",
-            on_bad_lines="skip",
-        )
-    except UnicodeDecodeError:
-        file_obj.seek(0)
-        df = pd.read_csv(
-            file_obj,
-            header=None,
-            names=old_cols,
-            encoding="cp949",
-            engine="python",
-            on_bad_lines="skip",
-        )
+    df = read_csv_fast(
+        file_obj,
+        header=None,
+        names=old_cols,
+        on_bad_lines="skip",
+    )
 
     # 표준 컬럼 맞추기
     df["se_cd"] = df["legacy_se_cd"]
@@ -100,21 +102,10 @@ def read_old_csv_file(file_obj, source_file: str) -> pd.DataFrame:
 
 # 헤더 있는 최근 csv 파일 읽기 (2019~)
 def read_csv_file(file_obj, source_file: str) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(
-            file_obj,
-            encoding="utf-8",
-            engine="python",
-            on_bad_lines="skip",
-        )
-    except UnicodeDecodeError:
-        file_obj.seek(0)
-        df = pd.read_csv(
-            file_obj,
-            encoding="cp949",
-            engine="python",
-            on_bad_lines="skip",
-        )
+    df = read_csv_fast(
+        file_obj,
+        on_bad_lines="skip",
+    )
 
     return standardize_columns(df, source_file)
 
