@@ -6,14 +6,14 @@ import os
 def geo_flood():
     
 
-    flood_gdf = gpd.read_file('data/flood/gangnam_flood_data.geojson')
-    grid_gdf = gpd.read_file('data/grid/gangnam_grid.geojson')
+    flood_gdf = gpd.read_file('data/flood/seoul_flood_data.geojson')
+    grid_gdf = gpd.read_file('data/grid/seoul_grid.geojson')
 
     if grid_gdf.crs != flood_gdf.crs:
         print("불일치")
         flood_gdf = flood_gdf.to_crs(grid_gdf.crs)
 
-    #공간 결합 침수 위치가 어떤 grid에 포함되는지
+    # 공간 결합 침수 위치가 어떤 grid에 포함되는지
     joined= gpd.sjoin(
         flood_gdf,
         grid_gdf[['grid_id','geometry']],
@@ -21,39 +21,23 @@ def geo_flood():
         predicate='intersects' 
     )
     
-    joined_dedup = joined.drop_duplicates(subset=['grid_id', 'SAT_DATE', 'END_DATE', 'DEPTH'])
-    print("그리드ID별로 시작,끝,깊이 같은 중복값 제거 완료")
+    joined_dedup = joined.drop_duplicates(subset=['grid_id', 'F_SAT_YMD'])
+    print("그리드ID별로 시작,끝 같은 중복값 제거 완료")
+    joined_dedup['IS_FLOODED'] = 1
+    # grid_id별로 그룹화해서 침수발생연도개수(FLOOD_FREQ)+가장깊은수심(DEPTH) 통계냄
+    grid_history = joined_dedup[['grid_id', 'F_SAT_YMD', 'F_END_YMD', 'IS_FLOODED']]
+    print("시작, 끝 날짜/시간 및 침수 여부 데이터 추출 완료")
+    final_grid = grid_gdf.merge(grid_history, on='grid_id', how='left')
 
-    #grid_id별로 그룹화해서 침수발생연도개수(FLOOD_FREQ)+가장깊은수심(DEPTH) 통계냄
-    print("날짜 및 그리드별 데이터 집계 중")
-    grid_history = joined_dedup.groupby('grid_id').agg({
-        'SAT_DATE': lambda x: ', '.join(x.dropna().astype(str)),
-        'END_DATE': lambda x: ', '.join(x.dropna().astype(str)),
-        'DEPTH': lambda x: ', '.join(x.dropna().astype(str)),
-        'F_YR':'count'
-    }).reset_index()
-
-    # 컬럼명 정리
-    grid_history.rename(columns={
-        'DEPTH': 'FLOOD_DEPTH_LIST',
-        'F_YR': 'FLOOD_COUNT'
-    }, inplace=True)
-    grid_history['IS_FLOODED']=1
-
-    # 모든 grid 유지하면서 침수 정보 있는 grid만 값 채움
-    final_grid = grid_gdf.merge(grid_history,on='grid_id',how='left')
-
-    final_grid['FLOOD_COUNT'] = final_grid['FLOOD_COUNT'].fillna(0).astype(int)
+    # 침수 이력이 없는(Null) 그리드들의 결측치 처리
     final_grid['IS_FLOODED'] = final_grid['IS_FLOODED'].fillna(0).astype(int)
-    final_grid['FLOOD_DEPTH_LIST'] = final_grid['FLOOD_DEPTH_LIST'].fillna("0.0")
-    print("데이터 붙임 완료")
     
-    final_grid['SAT_DATE'] = final_grid['SAT_DATE'].fillna("")
-    final_grid['END_DATE'] = final_grid['END_DATE'].fillna("")
+    print("데이터 병합 완료")
 
     os.makedirs("data/grid", exist_ok=True)
 
-    output_path = "data/flood/gangnam_final_flood_grid.parquet"
+    # output_path = "data/flood/seoul_final_flood_grid.geojson"
+    output_path = "data/flood/seoul_final_flood_grid.parquet"
     final_grid.to_parquet(output_path, engine='pyarrow')
     # final_grid.to_file(output_path, driver="GeoJSON")
 
