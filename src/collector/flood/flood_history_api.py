@@ -30,16 +30,19 @@ def geo_flood():
     final_grid = grid_gdf.merge(grid_history, on='grid_id', how='left')
 
     # 침수 이력이 없는(Null) 그리드들의 결측치 처리
-    final_grid['IS_FLOODED'] = final_grid['IS_FLOODED'].fillna(0).astype(int)
-    
+    final_grid['IS_FLOODED'] = final_grid['IS_FLOODED'].fillna(0).astype('int32')
+
+    final_grid = final_grid.drop(columns=['lon','lat','geometry'])
+    final_grid = final_grid.sort_values(by=['grid_id', 'F_SAT_YMD'])
+    final_grid = final_grid.reset_index(drop=True)
     print("데이터 병합 완료")
 
     os.makedirs("data/grid", exist_ok=True)
 
     # output_path = "data/flood/seoul_final_flood_grid.geojson"
+    # final_grid.to_file(output_path, driver="GeoJSON")
     output_path = "data/flood/seoul_final_flood_grid.parquet"
     final_grid.to_parquet(output_path, engine='pyarrow')
-    # final_grid.to_file(output_path, driver="GeoJSON")
 
 if __name__ =="__main__":
     geo_flood()
