@@ -8,7 +8,10 @@ seen = set()
 
 BASE_DIR = Path(__file__).resolve().parents[3]
 GRID_MAP_PATH = BASE_DIR / "data" / "grid" / "sensor_grid_map.csv"
-OUTPUT_PATH = BASE_DIR / "data" / "output" / "gangnam_sewer_grid.csv"
+OUTPUT_PATH = BASE_DIR / "data" / "output" / "seoul_sewer_api.parquet"
+
+DISTRICT_CODES = [f"{i:02d}" for i in range(1, 26)]
+
 
 # 현재 시각 기준으로 최근 1시간 조회 범위를 반환
 def get_current_hour_range():
@@ -17,9 +20,9 @@ def get_current_hour_range():
     end = now.strftime("%Y%m%d%H")
     return start, end
 
-# 서울 Open API에서 강남구 하수관 수위 데이터를 조회
-def get_gangnam_drainpipe_data(api_key):
-    district_code = "23" #강남구 코드
+
+# 구별 하수관 수위 데이터 조회
+def get_drainpipe_data_by_district(api_key, district_code):
     start_time, end_time = get_current_hour_range()
 
     url = (
@@ -32,7 +35,14 @@ def get_gangnam_drainpipe_data(api_key):
 
     response = requests.get(url, timeout=10)
     response.raise_for_status()
-    data = response.json()
+
+    try:
+        data = response.json()
+    except Exception:
+        print("JSON 파싱 실패")
+        print("status_code:", response.status_code)
+        print("response text:", response.text[:500])
+        raise
 
     print("API 응답 최상위 키:", data.keys())
 
@@ -40,7 +50,7 @@ def get_gangnam_drainpipe_data(api_key):
         print("RESULT 내용:", data["RESULT"])
 
     rows = data.get("DrainpipeMonitoringInfo", {}).get("row", [])
-    print("가져온 row 수:", len(rows))
+    print(f"{district_code} 가져온 row 수:", len(rows))
 
     result = []
     for r in rows:
@@ -48,10 +58,25 @@ def get_gangnam_drainpipe_data(api_key):
             "sensor_id": r.get("UNQ_NO"),
             "water_level": r.get("MSRMT_WATL"),
             "time": r.get("MSRMT_YMD"),
-            "location": r.get("PSTN_INFO")
+            "location": r.get("PSTN_INFO"),
         })
 
     return result
+
+
+# 서울 전체(25개 구 순회) 조회
+def get_seoul_drainpipe_data(api_key):
+    all_rows = []
+
+    for district_code in DISTRICT_CODES:
+        try:
+            rows = get_drainpipe_data_by_district(api_key, district_code)
+            all_rows.extend(rows)
+        except Exception as e:
+            print(f"{district_code} 호출 실패: {e}")
+
+    return all_rows
+
 
 # 수집한 센서 데이터에 grid_id를 매핑하고 parquet 파일로 저장
 def attach_grid_and_save(rows):
@@ -81,15 +106,16 @@ def attach_grid_and_save(rows):
 
     result = merged[["time", "grid_id", "water_level"]].copy()
 
-    # 타입 정리
     result = result.dropna(subset=["grid_id"])
     result["grid_id"] = result["grid_id"].astype("Int64")
-    result["water_level"] = pd.to_numeric(result["water_level"], errors="coerce").astype("float32")
+    result["water_level"] = pd.to_numeric(
+        result["water_level"], errors="coerce"
+    ).astype("float32")
     result["time"] = pd.to_datetime(result["time"], errors="coerce").dt.floor("h")
 
     result = result.dropna(subset=["time", "water_level"])
 
-    # 같은 시간 + grid 최대값
+    # 같은 시간 + 같은 grid면 최대 수위만 사용
     result = (
         result.groupby(["time", "grid_id"], as_index=False)["water_level"]
         .max()
@@ -97,11 +123,9 @@ def attach_grid_and_save(rows):
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    parquet_path = OUTPUT_PATH.with_suffix(".parquet")
-
     # 기존 파일 있으면 concat
-    if parquet_path.exists():
-        existing = pd.read_parquet(parquet_path)
+    if OUTPUT_PATH.exists():
+        existing = pd.read_parquet(OUTPUT_PATH)
         result = pd.concat([existing, result], ignore_index=True)
 
         # 중복 제거
@@ -109,21 +133,24 @@ def attach_grid_and_save(rows):
         result = result.drop_duplicates(["time", "grid_id"], keep="last")
 
     # 저장
-    result.to_parquet(parquet_path, index=False)
+    result.to_parquet(OUTPUT_PATH, index=False)
+    result.to_csv(OUTPUT_PATH.with_suffix(".csv"), index=False, encoding="utf-8-sig")
 
-    print("Parquet 저장 완료:", parquet_path)
+    print("Parquet 저장 완료:", OUTPUT_PATH)
+    print("CSV 저장 완료:", OUTPUT_PATH.with_suffix(".csv"))
 
     return result
 
+
 # 일정 주기마다 API를 호출해 새 데이터만 저장
-def run_polling(api_key, interval_seconds=10):
+def run_polling(api_key, interval_seconds=300):
     while True:
         try:
-            data = get_gangnam_drainpipe_data(api_key)
+            data = get_seoul_drainpipe_data(api_key)
             new_rows = []
 
             for row in data:
-                key = (row["sensor_id"], row["time"])
+                key = (str(row["sensor_id"]).strip(), row["time"])
                 if key not in seen:
                     seen.add(key)
                     new_rows.append(row)

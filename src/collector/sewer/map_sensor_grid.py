@@ -8,7 +8,7 @@ def map_sensor_to_grid():
     base_dir = Path(__file__).resolve().parents[3]
 
     sensor_csv_path = base_dir / "data" / "sensor" / "sensor_locations.csv"
-    grid_geojson_path = base_dir / "data" / "grid" / "gangnam_grid.geojson"
+    grid_geojson_path = base_dir / "data" / "grid" / "seoul_grid.geojson"
     output_csv_path = base_dir / "data" / "grid" / "sensor_grid_map.csv"
 
     #센서 위치 csv 읽기
