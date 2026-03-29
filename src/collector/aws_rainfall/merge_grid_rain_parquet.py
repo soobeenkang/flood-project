@@ -15,14 +15,13 @@ def merge_parquet():
 
     writer = None
 
-    for f in files:
+    for i, f in enumerate(files):
         df = pd.read_parquet(f)
-
         table = pa.Table.from_pandas(df)
 
         if writer is None:
             writer = pq.ParquetWriter(
-                "data/final/grid_rainfall.parquet",
+                "data/rainfall_history/aws_rainfall_final.parquet",
                 table.schema,
                 compression="snappy"
             )
@@ -35,7 +34,7 @@ def merge_parquet():
     if writer:
         writer.close()
 
-    print("최종 강남 aws rainfall with grid parquet 생성 완료")
+    print("최종 서울 aws rainfall parquet 생성 완료")
 
 
 if __name__ == "__main__":

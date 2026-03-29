@@ -16,4 +16,9 @@ meta = meta.rename(columns={
 meta = meta[["station", "start_date", "expired_date", "lat", "lon"]]
 
 print(f"관측소 수: {len(meta)}")
-meta.to_csv("data/raw_aws/station_coords.csv", index=False)
+meta.to_csv("data/rainfall_history/station_coords.csv", index=False)
+
+# 좌표 변경 이력이 있는 관측소 확인
+changed = meta.groupby("station").filter(lambda x: len(x) > 1)
+print(f"좌표 변경 관측소 수: {changed['station'].nunique()}")
+print(changed[["station", "start_date", "expired_date", "lat", "lon"]])
