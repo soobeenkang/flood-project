@@ -24,6 +24,7 @@ COLUMN_MAP = {
     "UNQ_NO": "unq_no",
     "unq_no": "unq_no",
     "고유번호": "unq_no",
+    "?고유번호" :"unq_no",
 
     "SE_CD": "se_cd",
     "se_cd": "se_cd",
