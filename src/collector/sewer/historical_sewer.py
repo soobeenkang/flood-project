@@ -220,19 +220,7 @@ def attach_grid_and_transform(
         right_on="sensor_id",
         how="left",
     )
-    """
-    # 매핑 안 된 센서 확인
-    unmatched = (
-        merged[merged["grid_id"].isna()][["unq_no", "se_cd", "se_nm", "pstn_info"]]
-        .drop_duplicates()
-        .copy()
-    )
-
-    if not unmatched.empty:
-        print("\n매핑 안 된 센서 수:", unmatched["unq_no"].nunique())
-        print(unmatched.head(30))
-
-    """
+   
     # 필요한 컬럼만 추출
     result = merged[["msrmt_ymd", "grid_id", "msrmt_watl"]].copy()
     result = result.rename(columns={
@@ -340,22 +328,7 @@ if __name__ == "__main__":
         print(f"중간 저장 완료: {z.name}")
         print(f"현재 누적 행 수: {total_rows}")
 
-    """
-    # unmatched는 비어도 파일 생성
-    if all_unmatched:
-        unmatched_total = pd.concat(all_unmatched, ignore_index=True)
-        unmatched_total = unmatched_total.drop_duplicates(subset=["unq_no"]).reset_index(drop=True)
-    else:
-        unmatched_total = pd.DataFrame(columns=["unq_no", "se_cd", "se_nm", "pstn_info"])
-
-    unmatched_total.to_csv(unmatched_csv, index=False, encoding="utf-8-sig")
-    print(f"미매핑 센서 저장 완료: {unmatched_csv}")
-    print(f"전체 누적 미매핑 센서 수: {len(unmatched_total)}")
-
-    if not output_parquet.exists():
-        print("최종 저장된 데이터가 없습니다.")
-        raise SystemExit
-    """
+    
 
     final_result = pd.read_parquet(output_parquet)
 
