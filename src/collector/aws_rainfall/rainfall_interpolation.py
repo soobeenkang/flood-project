@@ -1,4 +1,5 @@
 """
+    필터링: 침수 이력이 있는 그리드, 침수 발생 시간 + 강수가 있는 시간
     그리드 셀마다 이웃 관측소를 찾고
     시간 당 강수량을 idw 함수를 사용해 매핑하는 코드
 """
@@ -159,11 +160,19 @@ def process_one(i, t, station_ids, station_locs, neighbor_dist, neighbor_idx,
 
 #   최종 함수
 def generate_grid_rain_parquet():
+    # --- 침수 그리드 데이터 불러오기 ---
+    flood = pd.read_parquet("data/final/seoul_final_flood_grid.parquet")
+    flood = flood.dropna(subset=["F_SAT_YMD", "F_END_YMD"])
+
     # --- 서울 그리드 데이터 불러오기 ---
     grid = gpd.read_file("data/grid/seoul_grid.geojson").to_crs(epsg=5186)
 
     if "grid_id" not in grid.columns:
         grid = grid.reset_index().rename(columns={"index": "grid_id"})
+
+    #   침수 발생 이력 그리드만 필터링
+    valid_grids = flood["grid_id"].unique()
+    grid = grid[grid["grid_id"].isin(valid_grids)]
 
     grid_points = np.vstack([grid.geometry.centroid.x.values,
                              grid.geometry.centroid.y.values]).T
@@ -182,13 +191,7 @@ def generate_grid_rain_parquet():
     period_trees = build_period_trees(station_meta, valid_stations, grid_points)
     print(f"KDTree 구간 수: {len(period_trees)}") 
 
-    """
-        학습 데이터 셋에서 사용하는 데이터만 rain_filtered로 추출
-    """
     #   침수 발생 시간대 필터링
-    flood = pd.read_parquet("data/final/seoul_final_flood_grid.parquet")
-    flood = flood.dropna(subset=["F_SAT_YMD", "F_END_YMD"])
-
     flood_hours = set()
     for row in flood.itertuples(index=False):
         hours = pd.date_range(row.F_SAT_YMD.floor("h"), row.F_END_YMD.floor("h"), freq="h")
