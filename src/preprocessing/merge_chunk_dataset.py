@@ -1,0 +1,41 @@
+"""
+    만들어진 chunk parquet 파일을 합쳐서
+    하나의 parquet으로 만드는 코드
+"""
+import pandas as pd
+import glob
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+
+def merge_parquet():
+
+    files = sorted(glob.glob("data/tmp_final/*.parquet"))
+    print(f"파일 개수: {len(files)}")
+
+    writer = None
+
+    for i, f in enumerate(files):
+        df = pd.read_parquet(f)
+        table = pa.Table.from_pandas(df)
+
+        if writer is None:
+            writer = pq.ParquetWriter(
+                "data/final/seoul_dataset.parquet",
+                table.schema,
+                compression="snappy"
+            )
+
+        writer.write_table(table)
+
+        if i % 10 == 0:
+            print(f"{i}/{len(files)} 완료")
+
+    if writer:
+        writer.close()
+
+    print("최종 서울 dataset parquet 생성 완료")
+
+
+if __name__ == "__main__":
+    merge_parquet()
