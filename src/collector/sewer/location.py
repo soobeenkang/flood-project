@@ -9,6 +9,7 @@ import re
 BASE_DIR = Path(__file__).resolve().parents[3]
 OUTPUT_PATH = BASE_DIR / "data" / "sensor" / "sensor_locations.csv"
 
+#서울 25개 구 코드
 DISTRICT_CODES = [f"{i:02d}" for i in range(1, 26)]
 
 #카카오 API 키 (REST API KEY)
@@ -16,7 +17,7 @@ KAKAO_API_KEY = "api key"
 
 seen = set()
 
-
+#최근 1시간 데이터 범위 생성
 def get_current_hour_range():
     now = datetime.now()
     start = (now - timedelta(hours=1)).strftime("%Y%m%d%H")
@@ -24,6 +25,7 @@ def get_current_hour_range():
     return start, end
 
 
+#특정 구의 하수관 센서 데이터 가져오기
 def get_drainpipe_data_by_district(api_key, district_code):
     start_time, end_time = get_current_hour_range()
 
@@ -59,10 +61,11 @@ def get_drainpipe_data_by_district(api_key, district_code):
 
     return result
 
-
+#서울 전체 센서 데이터 수집
 def get_seoul_sensor_data(api_key):
     all_rows = []
 
+    #25개 구 반복
     for district_code in DISTRICT_CODES:
         try:
             rows = get_drainpipe_data_by_district(api_key, district_code)
@@ -74,6 +77,7 @@ def get_seoul_sensor_data(api_key):
     df = df.drop_duplicates(subset=["sensor_id"])
     return df
 
+#주소 문자열 정제
 def clean_address(addr: str) -> str:
     if not addr or str(addr).strip().lower() == "none":
         return ""
@@ -130,7 +134,7 @@ def geocode_address(address):
 
     return None, None
 
-
+#센서 위치 데이터 업데이트 + 저장
 def update_sensor_locations(api_key):
     new_df = get_seoul_sensor_data(api_key)
 
