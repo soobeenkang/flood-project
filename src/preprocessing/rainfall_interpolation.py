@@ -1,7 +1,12 @@
+"""
+    그리드 셀과 시간 당 강수량을
+    idw 함수를 사용해 매핑하는 코드
+"""
 import geopandas as gpd
 import pandas as pd
 import numpy as np
 from numba import njit
+from joblib import Parallel, delayed
 import os
 
 # 관측소 좌표
@@ -24,6 +29,7 @@ features = [
     "rain_max_3h"
 ]
 
+#   5개의 관측소와의 거리를 이용해 가중치로 해당 그리드 셀 강수 계산
 @njit
 def idw(grid_points, station_points, station_values):
 
@@ -74,7 +80,7 @@ def generate_grid_rain_parquet():
     os.makedirs("data/tmp_parquet", exist_ok=True)
 
     for i, (t, rain_now) in enumerate(rain.groupby("time")):
-
+ 
         print(f"{i}번째 시간 처리중: {t}")
 
         rain_now = rain_now[rain_now["station"].isin(station_coords)]
