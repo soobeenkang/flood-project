@@ -4,24 +4,24 @@ from shapely.geometry import box
 import os
 
 
-def generate_gangnam_grid():
+def generate_seoul_grid():
 
     shp_path = "data/boundary/BND_SIGUNGU_PG.shp"
 
     print("시군구 데이터 로드 중...")
     gdf = gpd.read_file(shp_path)
     
-    # 강남구 추출
-    gangnam = gdf[gdf["SIGUNGU_NM"] == "강남구"]
+    # 서울시 추출
+    seoul = gdf[gdf["SIGUNGU_CD"].astype(str).str.startswith("11")]
 
-    print("강남구 추출 완료")
+    print("서울시 추출 완료")
 
     # 미터 좌표계로 변환 for generate grid
-    gangnam = gangnam.to_crs(epsg=5179)
+    seoul = seoul.to_crs(epsg=5179)
 
-    gangnam_union = gangnam.geometry.unary_union
+    seoul_union = seoul.geometry.unary_union
 
-    minx, miny, maxx, maxy = gangnam.total_bounds
+    minx, miny, maxx, maxy = seoul.total_bounds
     
     # 100m
     grid_size = 100
@@ -35,7 +35,7 @@ def generate_gangnam_grid():
 
             cell = box(x, y, x + grid_size, y + grid_size)
 
-            if cell.intersects(gangnam_union):
+            if cell.intersects(seoul_union):
                 grid_cells.append(cell)
 
     grid = gpd.GeoDataFrame(geometry=grid_cells, crs="EPSG:5179")
@@ -59,7 +59,7 @@ def generate_gangnam_grid():
 
     os.makedirs("data/grid", exist_ok=True)
 
-    output_path = "data/grid/gangnam_grid.geojson"
+    output_path = "data/grid/seoul_grid.geojson"
 
     grid.to_file(output_path, driver="GeoJSON")
 
@@ -69,4 +69,4 @@ def generate_gangnam_grid():
 
 
 if __name__ == "__main__":
-    generate_gangnam_grid()
+    generate_seoul_grid()
