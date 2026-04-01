@@ -1,0 +1,235 @@
+import zipfile
+import glob
+import os
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+from shapely.geometry import box
+
+
+def generate_gangnam_grid_with_segokcheon_distance():
+    # -----------------------------
+    # 1) 강남구 grid 생성
+    # -----------------------------
+    shp_path = "src/collector/data/boundary/BND_SIGUNGU_PG.shp"
+
+    print("시군구 데이터 로드 중...")
+    gdf = gpd.read_file(shp_path)
+
+    gangnam = gdf[gdf["SIGUNGU_NM"] == "강남구"].copy()
+    gangnam = gangnam.to_crs(epsg=5179)
+
+    gangnam_union = gangnam.geometry.union_all()
+    minx, miny, maxx, maxy = gangnam.total_bounds
+
+    grid_size = 100
+    grid_cells = []
+
+    print("grid 생성 중...")
+    for x in np.arange(minx, maxx, grid_size):
+        for y in np.arange(miny, maxy, grid_size):
+            cell = box(x, y, x + grid_size, y + grid_size)
+
+            if cell.intersects(gangnam_union):
+                grid_cells.append(cell)
+
+    grid = gpd.GeoDataFrame(geometry=grid_cells, crs="EPSG:5179")
+    grid["grid_id"] = range(len(grid))
+
+    print("grid 개수:", len(grid))
+
+    # -----------------------------
+    # 2) DEM data 폴더에서 shp 전부 읽기
+    # -----------------------------
+    zip_folder = r"DEM data"
+    extract_folder = r"DEM data"
+
+    os.makedirs(extract_folder, exist_ok=True)
+
+    print("zip 압축 해제 중...")
+    zip_files = glob.glob(os.path.join(zip_folder, "*.zip"))
+
+    for z in zip_files:
+        with zipfile.ZipFile(z, "r") as zip_ref:
+            zip_ref.extractall(extract_folder)
+
+    print("압축 해제 완료")
+
+    shp_files = glob.glob(os.path.join(extract_folder, "**/*.shp"), recursive=True)
+
+    gdfs = []
+    print("shp 파일 로드 중...")
+    for f in shp_files:
+        try:
+            temp = gpd.read_file(f)
+            gdfs.append(temp)
+        except Exception as e:
+            print("읽기 실패:", f, e)
+
+    if not gdfs:
+        raise ValueError("읽어온 shp 파일이 없습니다.")
+
+    gdf_all = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True))
+    print("전체 데이터 수:", len(gdf_all))
+    print("전체 컬럼:", list(gdf_all.columns))
+
+    if "하천명" not in gdf_all.columns:
+        raise ValueError("'하천명' 컬럼이 없습니다.")
+
+    print("\n=== 하천명 일부 확인 ===")
+    print(gdf_all["하천명"].dropna().unique()[:50])
+
+    # -----------------------------
+    # 3) 세곡천 데이터 필터링
+    # -----------------------------
+    segokcheon = gdf_all[
+        gdf_all["하천명"].astype(str).str.contains("세곡천", na=False) &
+        gdf_all.geometry.notnull()
+    ].copy()
+
+    print("\n세곡천 원본 개수:", len(segokcheon))
+
+    if len(segokcheon) == 0:
+        raise ValueError("세곡천 데이터가 없습니다. 하천명 값을 직접 확인하세요.")
+
+    print("\n=== 세곡천 하천명 목록 ===")
+    print(segokcheon[["하천명"]].drop_duplicates())
+
+    print("\n=== 세곡천 geometry 타입(원본) ===")
+    print(segokcheon.geometry.type.value_counts())
+
+    # -----------------------------
+    # 4) 좌표계 통일
+    # -----------------------------
+    if segokcheon.crs is None:
+        segokcheon = segokcheon.set_crs(epsg=5186)
+
+    segokcheon = segokcheon.to_crs(epsg=5179)
+
+    print("\n=== 세곡천 CRS ===")
+    print(segokcheon.crs)
+
+    print("\n=== 세곡천 범위 ===")
+    print(segokcheon.total_bounds)
+
+    print("\n=== grid 범위 ===")
+    print(grid.total_bounds)
+
+    # -----------------------------
+    # 5) Polygon -> boundary 변환
+    # -----------------------------
+    print("\n세곡천 Polygon을 boundary로 변환 중...")
+    segokcheon_boundary = segokcheon.copy()
+    segokcheon_boundary["geometry"] = segokcheon_boundary.geometry.boundary
+
+    segokcheon_boundary = segokcheon_boundary[
+        ~segokcheon_boundary.geometry.is_empty
+    ].copy()
+
+    print("\n=== 세곡천 geometry 타입(boundary 변환 후) ===")
+    print(segokcheon_boundary.geometry.type.value_counts())
+
+    if len(segokcheon_boundary) == 0:
+        raise ValueError("세곡천 boundary 변환 후 geometry가 비었습니다.")
+
+    print("\n=== 세곡천 boundary 범위 ===")
+    print(segokcheon_boundary.total_bounds)
+
+    # -----------------------------
+    # 6) grid centroid 기준 세곡천 경계선까지 최근접 거리 계산
+    # -----------------------------
+    print("\ngrid centroid 계산 중...")
+    centroids = grid.centroid
+
+    centroid_gdf = gpd.GeoDataFrame(
+        {"grid_id": grid["grid_id"]},
+        geometry=centroids,
+        crs="EPSG:5179"
+    )
+
+    print("최근접 세곡천 경계선 거리 계산 중...")
+    nearest = gpd.sjoin_nearest(
+        centroid_gdf,
+        segokcheon_boundary[["하천명", "geometry"]],
+        how="left",
+        distance_col="dist_to_segokcheon_boundary"
+    )
+
+    print("최근접 세곡천 경계선 매핑 수:", len(nearest))
+
+    print("\n=== dist_to_segokcheon_boundary 기초 통계 ===")
+    print(nearest["dist_to_segokcheon_boundary"].describe())
+
+    print("\n=== dist_to_segokcheon_boundary 앞부분 ===")
+    print(nearest[["grid_id", "dist_to_segokcheon_boundary"]].head(20))
+
+    # -----------------------------
+    # 7) grid에 거리 정보 합치기
+    # -----------------------------
+    segokcheon_distance_per_grid = nearest[
+        ["grid_id", "dist_to_segokcheon_boundary", "하천명"]
+    ].copy()
+
+    grid = grid.merge(segokcheon_distance_per_grid, on="grid_id", how="left")
+
+    print("\n결측값 처리 중...")
+    max_dist = grid["dist_to_segokcheon_boundary"].max()
+
+    if pd.isna(max_dist):
+        raise ValueError("dist_to_segokcheon_boundary 전체가 NaN입니다. 좌표계나 geometry를 확인하세요.")
+
+    grid["dist_to_segokcheon_boundary"] = grid["dist_to_segokcheon_boundary"].fillna(max_dist)
+
+    # -----------------------------
+    # 8) 거리 구간화
+    # -----------------------------
+    print("거리 구간화 중...")
+
+    bins = [-1, 100, 500, float("inf")]
+    labels = ["0-100m", "100-500m", "500m+"]
+
+    grid["segokcheon_distance_label"] = pd.cut(
+        grid["dist_to_segokcheon_boundary"],
+        bins=bins,
+        labels=labels
+    )
+
+    # 모델용 숫자 클래스
+    # 0: 0~100m, 1: 100~500m, 2: 500m+
+    grid["segokcheon_distance_class"] = pd.cut(
+        grid["dist_to_segokcheon_boundary"],
+        bins=bins,
+        labels=[0, 1, 2]
+    ).astype(int)
+
+    print("\n=== 구간별 개수 ===")
+    print(grid["segokcheon_distance_label"].value_counts(dropna=False))
+
+    # 선택: 세곡천 polygon과 직접 겹치는지 여부
+    segokcheon_union = segokcheon.geometry.union_all()
+    grid["intersects_segokcheon"] = grid.intersects(segokcheon_union).astype(int)
+
+    # -----------------------------
+    # 9) centroid 위경도 변환
+    # -----------------------------
+    print("위경도 변환 중...")
+    centroids_wgs84 = gpd.GeoSeries(centroids, crs="EPSG:5179").to_crs(epsg=4326)
+
+    grid = grid.to_crs(epsg=4326)
+
+    grid["lon"] = centroids_wgs84.x
+    grid["lat"] = centroids_wgs84.y
+
+    # -----------------------------
+    # 10) 저장
+    # -----------------------------
+    os.makedirs("data/grid", exist_ok=True)
+    output_path = "data/grid/gangnam_grid_with_segokcheon_distance.geojson"
+    grid.to_file(output_path, driver="GeoJSON")
+
+    print("\n완료:", output_path)
+    return grid
+
+
+if __name__ == "__main__":
+    generate_gangnam_grid_with_segokcheon_distance()
