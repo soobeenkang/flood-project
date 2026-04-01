@@ -4,11 +4,12 @@
 
 Python 3.10
 
-Setup
+## Setup
 
 git clone <repo>
 cd flood-project
-python3.10 -m venv venv
+py -3.10 -m venv venv
 venv\Scripts\activate
+pip install --upgrade pip
 pip install -r requirements.txt
 
