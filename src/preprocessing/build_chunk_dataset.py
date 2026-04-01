@@ -2,6 +2,8 @@
     aws 강수량 chunk 파일들과
     flood, sewer, elev, river 데이터를 머지해서
     final chunck 파일로 내보내는 코드
+
+    최종: data/tmp_final/final_{i}.parquet
 """
 import pandas as pd
 import os
@@ -9,7 +11,7 @@ import os
 def build_final_dataset_from_chunks():
 
     #   flood 읽어오기
-    flood = pd.read_parquet("data/final/seoul_flood_grid.parquet")
+    flood = pd.read_parquet("data/final/seoul_final_flood_grid.parquet")
     flood["F_SAT_YMD"] = pd.to_datetime(flood["F_SAT_YMD"])
     flood["F_END_YMD"] = pd.to_datetime(flood["F_END_YMD"])
     flood = flood[
@@ -47,14 +49,14 @@ def build_final_dataset_from_chunks():
     #   output 만들기
     os.makedirs("data/tmp_final", exist_ok=True)
 
-    files = sorted(os.listdir("data/tmp_parquet"))
+    files = sorted(os.listdir("data/tmp_rainfall_parquet"))
     
     for i, file in enumerate(files):
-        if i % 1000 == 0:
+        if i % 10 == 0:
             print(f"\n{i} 처리 중: {file}")
 
         #   강수량 chunk 로딩
-        df = pd.read_parquet(f"data/tmp_parquet/{file}")
+        df = pd.read_parquet(f"data/tmp_rainfall_parquet/{file}")
         df["time"] = pd.to_datetime(df["time"])
 
         #   flood merge
@@ -63,12 +65,12 @@ def build_final_dataset_from_chunks():
         #   sewer merge
         df = df.merge(sewer, on=["grid_id", "time"], how="left")
         #   elev merge
-        df = df.merge(elev, on=["grid_id", "time"], how="left")
+        df = df.merge(elev, on=["grid_id"], how="left")
         #   river merge
-        df = df.merge(river, on=["grid_id", "time"], how="left")
+        df = df.merge(river, on=["grid_id"], how="left")
 
         #   sorting values
-        df = df.sort_values(["grid_id", "time"]).reset_index(drop=True)
+        df = df.sort_values(["time", "grid_id"]).reset_index(drop=True)
 
         df.to_parquet(
             f"data/tmp_final/final_{i}.parquet",
