@@ -26,6 +26,8 @@ def merge_static_data():
     flood_grids = flood["grid_id"].unique()
 
     elev = elev[elev["grid_id"].isin(flood_grids)]
+
+    print("침수 이력 그리드만 필터링")
     """
 
     elev = elev.merge(river, on=["grid_id"], how="left")

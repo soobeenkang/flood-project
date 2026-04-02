@@ -36,10 +36,9 @@ def merge_year_files():
             compression="snappy"
         )
 
-        """ # 병합 끝난 연도 tmp 파일들은 삭제
+        # 병합 끝난 연도별 tmp 파일들은 삭제
         for f in files:
             os.remove(f)
-        """
     
     print("연도별 단일 파일 생성 완료")
 
