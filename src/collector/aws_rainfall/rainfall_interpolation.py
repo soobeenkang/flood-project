@@ -179,7 +179,7 @@ def generate_grid_rain_parquet():
     grid_ids = grid["grid_id"].values
 
     # --- aws 강수 피쳐 불러오기 ---
-    rain = pd.read_csv("data/rainfall_history/aws_rainfall_features.csv")
+    rain = pd.read_csv("data/rainfall_history/aws_rainfall_features.csv") 
     rain["time"] = pd.to_datetime(rain["time"])
     rain["station"] = rain["station"].astype("int32")
 
@@ -211,7 +211,7 @@ def generate_grid_rain_parquet():
     """
 
     # --- 최종 tmp parquet 들을 순차 계산 ---
-    os.makedirs("data/tmp_parquet", exist_ok=True)
+    os.makedirs("data/tmp_rainfall_parquet", exist_ok=True)
 
     # chunk 별로 저장
     CHUNK_SIZE = 100
@@ -266,7 +266,7 @@ def generate_grid_rain_parquet():
         df_chunk = pd.concat(results, ignore_index=True)
 
         df_chunk.to_parquet(
-            f"data/tmp_parquet/chunk_{chunk_start}.parquet",
+            f"data/tmp_rainfall_parquet/chunk_{chunk_start}.parquet",
             engine="pyarrow",
             compression="snappy"
         )

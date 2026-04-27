@@ -10,7 +10,7 @@ import pyarrow.parquet as pq
 
 def merge_parquet():
 
-    files = sorted(glob.glob("data/tmp_parquet/chunk_*.parquet"))
+    files = sorted(glob.glob("data/tmp_rainfall_parquet/chunk_*.parquet"))
     print(f"파일 개수: {len(files)}")
 
     writer = None
