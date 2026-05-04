@@ -210,6 +210,9 @@ __marimo__/
 # data
 data/
 
+# test
+tests/
+
 # model weights
 *.pkl
 *.model
@@ -218,3 +221,32 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# ─── Node.js ───
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# ─── ML 모델 / 데이터 ───
+backend/python-api/ml/model/artifacts/
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+*.onnx
+
+# 학습된 LightGBM 모델 (확장자가 .txt라서 조건부)
+backend/python-api/ml/model/artifacts/*.txt
+
+# ─── Docker 볼륨 ───
+postgres_data/
+redis_data/
+mosquitto_data/
+mosquitto_log/
+
+# ─── 로그 ───
+*.log
+logs/
