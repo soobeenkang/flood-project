@@ -38,7 +38,6 @@ FEATURE_COLS = [
     # 수위 (lag)
     "water_level_lag1",
     # 시간 (datetime은 정수 분해해서 사용)
-    "month", "day", "hour", "dayofyear",
     "hour_sin", "hour_cos",
 ]
 TARGET_COL = "flood"
@@ -49,7 +48,7 @@ LOAD_COLS = FEATURE_COLS + [TARGET_COL]
 
 # ── 분할 / 학습 설정 ────────────────────────────
 TEST_YEARS = 2          # 마지막 N개 연도를 test로
-N_TRIALS = 75           # Optuna 시도 횟수
+N_TRIALS = 30           # Optuna 시도 횟수
 CV_FOLDS = 5            # TimeSeriesSplit fold 수
 RANDOM_STATE = 42
 DEFAULT_THRESHOLD = 0.3
