@@ -2,7 +2,7 @@ version: '3.9'
 
 services:
   postgres:
-    image: postgis/postgis:16-3.4
+    image: pgrouting/pgrouting:16-3.5-4.0
     container_name: flood_postgres
     restart: unless-stopped
     environment:
