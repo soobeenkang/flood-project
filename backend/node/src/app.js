@@ -9,7 +9,7 @@ import errorHandler from './middlewares/errorHandler.js';
 import { initMqtt } from './services/mqtt.service.js';
 import { initScheduler } from './services/scheduler.service.js';
 
-const app = expres();
+const app = express();
 app.use(cors());
 app.use(express.json());
 
