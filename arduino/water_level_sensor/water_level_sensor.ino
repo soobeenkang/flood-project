@@ -1,15 +1,42 @@
 #include "BluetoothSerial.h"
 #include <TinyGPS++.h>
 
+#include <PubSubClient.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
+// #include <HTTPClient.h>
 BluetoothSerial SerialBT;
 TinyGPSPlus gps;
 
+WiFiClient espClient;
+PubSubClient client(espClient);
 const char* ssid = "WIFI_ID";
 const char* password = "WIFI_PW";
+
+const char* mqtt_server = "SERVER_PORT";
+
+const char* SENSOR_ID = "S001";
+
 const int waterSensorPin = 34;
 
+void reconnectMQTT() {
+
+  while (!client.connected()) {
+
+    Serial.print("MQTT 연결 시도...");
+
+    if (client.connect("ESP32Client")) {
+
+      Serial.println("성공");
+
+    } else {
+
+      Serial.print("실패: ");
+      Serial.println(client.state());
+
+      delay(2000);
+    }
+  }
+}
 void setup() {
 
   Serial.begin(115200);
@@ -32,9 +59,15 @@ void setup() {
   Serial.println("연결 성공!");
   Serial.print("IP 주소: ");
   Serial.println(WiFi.localIP());
+  client.setServer(mqtt_server, 1883);
 }
 
 void loop() {
+  if (!client.connected()) {
+    reconnectMQTT();
+  }
+
+  client.loop();
 
   Serial.println("loop 시작");
     // 수위센서 값 읽기
@@ -80,26 +113,17 @@ void loop() {
 
   // WiFi 연결 상태 확인
   if (WiFi.status() == WL_CONNECTED) {
-
-    HTTPClient http;
-
-    // 서버 주소
-    http.begin("SERVER_IP:5000/data");
-
-    http.addHeader("Content-Type", "application/json");
-
-    // JSON 데이터 생성
     String jsonData =
-        "{\"water\": " + String(waterValue) +
+        "{\"sensor_id\": \"" + String(SENSOR_ID) +
+        "\", \"water\": " + String(waterValue) +
         ", \"lat\": " + String(lat, 6) +
         ", \"lng\": " + String(lng, 6) + "}";
-    // POST 요청
-    int responseCode = http.POST(jsonData);
 
-    Serial.print("응답 코드: ");
-    Serial.println(responseCode);
+    client.publish("flood/data", jsonData.c_str());
 
-    http.end();
+    Serial.println("MQTT 전송 완료");
+    Serial.println(jsonData);
+
   }
 
   delay(3000); //1분 : 6만
