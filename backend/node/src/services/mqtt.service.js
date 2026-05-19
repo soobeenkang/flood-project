@@ -19,7 +19,8 @@ const pool = new Pool({
 
 export function initMqtt() {
 
-    const client = mqtt.connect("mqtt://mosquitto:1883");
+    const mqttUrl = process.env.MQTT_URL;
+    const client = mqtt.connect(mqttUrl);
 
     client.on("connect", () => {
 
