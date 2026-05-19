@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   postgres:
     image: pgrouting/pgrouting:16-3.5-4.0
@@ -16,7 +14,7 @@ services:
       # 최초 부팅시 자동 실행
       - ./backend/node/src/db/migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready - U ${DB_USER:-flood}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-flood} -d ${DB_NAME:-flood_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -47,6 +45,12 @@ services:
       - ./infra/mosquitto/config:/mosquitto/config
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$sys/#", "-C", "1", "-E", "-i", "healthcheck", "-W", "3"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
   
   node-api:
     build:
