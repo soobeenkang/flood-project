@@ -1,60 +1,86 @@
+"""
+flood_grid 테이블에 데이터 올리기
+
+소스 데이터:
+    - data/seoul_grid.geojson
+    - data/seoul_grid_with_elevation.parquet
+    - data/seoul_grid_with_river_flag.parquet
+"""
+
 import os
 import geopandas as gpd
+import pandas as pd
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
-load_dotenv(encoding="utf-8")
+load_dotenv()
+
+DATA_DIR = "data"
+GRID_FILE = f"{DATA_DIR}/grid/seoul_grid.geojson"
+ELEV_FILE = f"{DATA_DIR}/seoul_grid_with_elevation.parquet"
+RIVER_FILE = f"{DATA_DIR}/seoul_grid_with_river_flag.parquet"
 
 DB_URL = (
-    f"postgresql+psycopg2://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
+    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
     f"@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}"
     f"/{os.getenv('DB_NAME')}"
 )
 
-engine = create_engine(DB_URL)
+def main():
+    print("GeoJSON 로드중...")
+    gdf = gpd.read_file(GRID_FILE)
+    print(f"   격자 {len(gdf):,}개")
 
-gdf = gpd.read_file("data/seoul_grid.geojson")
+    if gdf.crs is None or gdf.crs.to_epsg() != 4326:
+        print(f"   CRS={gdf.crs} -> 4326 변환")
+        gdf = gdf.to_crs(4326)
 
-if gdf.crs is None:
-    gdf = gdf.set_crs(epsg=4326)
-elif gdf.crs.to_epsg() != 4326:
-    gdf = gdf.to_crs(epsg=4326)
+    print("   Parquet 로드중...")
+    elev_df = pd.read_parquet(ELEV_FILE)
+    river_df = pd.read_parquet(RIVER_FILE)
+    print(f"   고도 {len(elev_df):,}행, 하천 {len(river_df):,}행")
 
-required_cols = ["grid_id", "lon", "lat", "geometry"]
-gdf = gdf.dropna(subset=required_cols)
+    print(" 병합...")
+    gdf = gdf.merge(elev_df, on="grid_id", how="left")
+    gdf = gdf.merge(river_df, on="grid_id", how="left")
 
-records = []
-for _, row in gdf.iterrows():
-    records.append({
-        "grid_id": int(row["grid_id"]),
-        "center_lng": float(row["lon"]),
-        "center_lat": float(row["lat"]),
-        "geom_wkt": row["geometry"].wkt,
-        "elevation": None,
-        "is_river": False
+    gdf = gdf.rename(columns={
+        "lat": "center_lat",
+        "lon": "center_lon",
+        "mean_elevation": "elevation",
     })
 
-print(f"적재할 grid 개수: {len(records)}")
+    gdf["is_river"] = gdf["is_river"].fillna(0).astype("int16")
 
-with engine.begin() as conn:
-    conn.execute(text("""
-        INSERT INTO flood_grid (
-            grid_id,
-            geom,
-            center_lat,
-            center_lng,
-            elevation,
-            is_river
-        )
-        VALUES (
-            :grid_id,
-            ST_GeomFromText(:geom_wkt, 4326),
-            :center_lat,
-            :center_lng,
-            :elevation,
-            :is_river
-        )
-        ON CONFLICT (grid_id) DO NOTHING
-    """), records)
+    gdf = gdf.rename_geometry("geom")
 
-print("flood_grid 적재 완료")
+    gdf = gdf[["grid_id", "geom", "center_lat", "center_lon", "elevation", "is_river"]]
+
+    print(f"   준비 완료: {len(gdf):,}행")
+    print(f"   결측치: elevation={gdf['elevation'].isna().sum()}, is_river={(gdf['is_river']==0).sum()}")
+
+    engine = create_engine(DB_URL)
+
+    with engine.begin() as conn:
+        existing = conn.execute(text("SELECT COUNT(*) FROM flood_grid")).scalar()
+        if existing > 0:
+            print(f"  flood_grid에 이미 {existing:,}행 있음 -> TRUNCATE!")
+            conn.execute(text("TRUNCATE TABLE flood_grid CASCADE;"))
+
+        print("DB 업데이트 중...")
+        gdf.to_postgis("flood_grid", engine, if_exists="append", index=False)
+
+        with engine.connect() as conn:
+            count = conn.execute(text("SELECT COUNT(*) FROM flood_grid")).scalar()
+            sample = conn.execute(text(
+                "SELECT grid_id, ST_AsText(geom) as wkt, center_lat, center_lon, elevation, is_river "
+                "FROM flood_grid LIMIT 1"
+            )).fetchone()
+
+        print(f"\n완료: flood_grid에 {count:,}행 업로드")
+        print(f"  샘플: {sample}")
+
+
+if __name__ == "__main__":
+    main()
+            
