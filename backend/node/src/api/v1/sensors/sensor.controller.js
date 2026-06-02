@@ -1,17 +1,22 @@
 import * as sensorService from "./sensor.service.js";
 
-export async function getSensor(req,res){
-    const sensorId = req.params.sensorId;
+export async function getSensors(req, res){
 
-    const result = 
-        await sensorService.getSensor(sensorId);
-    
-        if(!result){
+    console.log("GET /sensors 요청");
 
-            return res.status(404).json({
-                message : "센서 없음"
-            });
-        }
-        
-        res.json(result);
+    const sensors =
+        await sensorService.getSensors();
+
+    res.json({
+        sensors
+    });
+}
+export async function ingest(req, res) {
+
+    console.log("POST /sensors/ingest 요청");
+
+    const result =
+        await sensorService.ingest(req.body);
+
+    res.json(result);
 }

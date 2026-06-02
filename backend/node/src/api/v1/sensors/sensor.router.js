@@ -2,10 +2,12 @@ import express from 'express';
 import * as sensorController from "./sensor.controller.js";
 
 const router = express.Router();
-
 router.get(
-    "/:sensorId",
-    sensorController.getSensor
+    "/",
+    sensorController.getSensors
 );
-
+router.post(
+    "/ingest",
+    sensorController.ingest
+);
 export default router;
