@@ -1,3 +1,14 @@
+"""
+
+프론트엔드에서 위경도 입력 시
+
+1. 캐시 확인: 이미 조회된 데이터인지, 이미 조회된 이력 있으면 그거 바로 보내기
+2. 격자 매핑: 입력받은 위경도에 해당하는 격자(grid_id) 찾기
+3. 날씨 쿼리: seoul_weather_collector.py가 생성한 seoul_weather.parquet파일에서 해당 격자에 해당하는 정보 가져오기
+4. response 형식 맞춰 데이터 가공 및 보내기
+
+"""
+
 import math
 import json
 import logging
@@ -12,6 +23,7 @@ import redis
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("FloodAlert-WeatherAPI")
 
+# FastAPI 인스턴스 생성, app 객체 통해 uvicorn 구동 및 라우팅
 app = FastAPI(title="FloodAlert Weather Service", version="1.0")
 
 # Redis 연결 설정
@@ -25,7 +37,7 @@ PARQUET_PATH = "seoul_weather.parquet"
 GEOJSON_PATH = "seoul_grid.geojson"
 
 # ────────────────────────────────────────────────
-# 1. Pydantic 모델 정의 (강수확률 제외 / grid_id 정수형 반영)
+# 1. Pydantic 모델 정의 (강수확률 제외, grid_id 정수형 반영)
 # ────────────────────────────────────────────────
 class WeatherResponse(BaseModel):
     grid_id: int        # 그리드 아이디
@@ -40,7 +52,7 @@ class WeatherResponse(BaseModel):
 # ────────────────────────────────────────────────
 def generate_forecast_text(sky_1h: float, rn1_now: float) -> str:
     """
-    1시간 후 하늘상태(sky_1h) 코드값을 해석하여 단기 예보 문구를 생성합니다.
+    1시간 후 하늘상태(sky_1h) 코드값을 해석하여 단기 예보 문구를 생성
     (1=맑음, 2=구름조금, 3=구름많음, 4=흐림)
     """
     sky_status = {
@@ -72,7 +84,7 @@ def get_current_weather(
 
     # 1. Redis 캐시 확인 (TTL 10분)
     cache_key = f"weather:{round(lat, 4)}:{round(lon, 4)}"
-    if r:
+    if r: # redis 서버가 정상적으로 켜져서 연결된 상태일 때
         try:
             cached_data = r.get(cache_key)
             if cached_data:
@@ -95,7 +107,7 @@ def get_current_weather(
             key=lambda x: math.hypot(x["properties"]["lat"] - lat, x["properties"]["lon"] - lon)
         )
         
-        # 소수점 형태나 문자열 데이터가 들어와도 안전하게 정수로 변환되도록 이중 캐스팅
+        # 소수점 형태나 문자열 데이터가 들어와도 안전하게 정수로 변환되도록
         raw_grid_id = closest_feat["properties"]["grid_id"]
         target_grid_id = int(float(raw_grid_id))
         
@@ -106,11 +118,11 @@ def get_current_weather(
             detail={"code": "GRID_NOT_FOUND", "message": f"그리드 파싱 실패: {str(e)}"}
         )
 
-    # 3. 수집기가 저장한 Parquet 파일 조회 및 데이터 필터링
+    # 3. seoul_weather.parquet 파일 조회 및 데이터 필터링
     try:
         df = pd.read_parquet(PARQUET_PATH)
         
-        # Parquet 데이터 내 grid_id 컬럼과 정확히 비교하기 위해 int 형식 유지
+        # parquet 데이터 내 grid_id 컬럼과 정확히 비교하기 위해 int 형식 유지
         grid_data = df[df["grid_id"] == target_grid_id]
         
         if grid_data.empty:
