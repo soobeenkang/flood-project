@@ -1,34 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
 import { MOCK_HEATMAP, HEATMAP_COLORS } from '../data/mockData';
+import { getHeatmapGrids } from '../services/api';
+
+const USE_MOCK = true;
 
 const TIME_STEPS = [
-  { label: '현재',  value: 'current' },
+  { label: '현재',  value: 'now' },
   { label: '1시간', value: '1h' },
   { label: '3시간', value: '3h' },
   { label: '6시간', value: '6h' },
 ];
 
 const SHOW_FROM = {
-  current: ['current'],
-  '1h':    ['1h', 'current'],
-  '3h':    ['3h', '1h', 'current'],
-  '6h':    ['6h', '3h', '1h', 'current'],
+  now:  ['now'],
+  '1h': ['1h', 'now'],
+  '3h': ['3h', '1h', 'now'],
+  '6h': ['6h', '3h', '1h', 'now'],
 };
-
-const LAYER_ORDER = ['6h', '3h', '1h', 'current'];
+const LAYER_ORDER = ['6h', '3h', '1h', 'now'];
 
 const MapPage = ({ userLocation }) => {
   const mapRef          = useRef(null);
   const canvasRef       = useRef(null);
   const kakaoMapRef     = useRef(null);
   const featuresRef     = useRef(null);
+  const floodIdsRef     = useRef({ now: new Set(), '1h': new Set(), '3h': new Set(), '6h': new Set() });
   const rafRef          = useRef(null);
-  const selectedTimeRef = useRef('current');
+  const selectedTimeRef = useRef('now');
 
-  const [selectedTime, setSelectedTime] = useState('current');
+  const [selectedTime, setSelectedTime] = useState('now');
   const [isLoading, setIsLoading]       = useState(false);
 
-  // ── Canvas 렌더링 ──────────────────────────────────────────────────────
   const redraw = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
@@ -37,10 +39,8 @@ const MapPage = ({ userLocation }) => {
       const features = featuresRef.current;
       if (!canvas || !kakaoMap || !features) return;
 
-      // canvas 크기를 지도 컨테이너에 맞춤
-      const node = mapRef.current;
-      canvas.width  = node.offsetWidth;
-      canvas.height = node.offsetHeight;
+      canvas.width  = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
 
       const ctx    = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -48,14 +48,18 @@ const MapPage = ({ userLocation }) => {
       const bounds = kakaoMap.getBounds();
       const sw     = bounds.getSouthWest();
       const ne     = bounds.getNorthEast();
-      const proj   = kakaoMap.getProjection();
+      const W      = canvas.width;
+      const H      = canvas.height;
+
+      const lngToX = (lng) => (lng - sw.getLng()) / (ne.getLng() - sw.getLng()) * W;
+      const latToY = (lat) => (1 - (lat - sw.getLat()) / (ne.getLat() - sw.getLat())) * H;
 
       const t            = selectedTimeRef.current;
-      const layersToShow = new Set(SHOW_FROM[t] ?? ['current']);
+      const layersToShow = new Set(SHOW_FROM[t] ?? ['now']);
 
       LAYER_ORDER.forEach((layer) => {
         if (!layersToShow.has(layer)) return;
-        const ids   = new Set(MOCK_HEATMAP[layer] ?? []);
+        const ids   = floodIdsRef.current[layer];
         const color = HEATMAP_COLORS[layer];
 
         features.forEach((feature) => {
@@ -67,9 +71,10 @@ const MapPage = ({ userLocation }) => {
           const coords = feature.geometry.coordinates[0];
           ctx.beginPath();
           coords.forEach(([lng, la], i) => {
-            const pt = proj.pointFromCoords(new window.kakao.maps.LatLng(la, lng));
-            if (i === 0) ctx.moveTo(pt.x, pt.y);
-            else         ctx.lineTo(pt.x, pt.y);
+            const x = lngToX(lng);
+            const y = latToY(la);
+            if (i === 0) ctx.moveTo(x, y);
+            else         ctx.lineTo(x, y);
           });
           ctx.closePath();
           ctx.fillStyle = color;
@@ -79,7 +84,20 @@ const MapPage = ({ userLocation }) => {
     });
   };
 
-  // ── 카카오맵 초기화 ───────────────────────────────────────────────────
+  // 히트맵 데이터 fetch (Mock or API)
+  const fetchHeatmap = async (horizon) => {
+    if (USE_MOCK) {
+      const ids = MOCK_HEATMAP[horizon] ?? [];
+      floodIdsRef.current[horizon] = new Set(ids);
+      return;
+    }
+    const { lat, lng } = userLocation;
+    const data = await getHeatmapGrids(lat, lng, horizon, 5000);
+    floodIdsRef.current[horizon] = new Set(
+      data.grids.filter(g => g.isflooded).map(g => g.id)
+    );
+  };
+
   useEffect(() => {
     const wait = setInterval(() => {
       if (window.kakao && window.kakao.maps) {
@@ -91,56 +109,47 @@ const MapPage = ({ userLocation }) => {
         });
         kakaoMapRef.current = kakaoMap;
 
-        // Canvas 생성 - mapRef 안에 붙임
-        const canvas = document.createElement('canvas');
-        const node   = mapRef.current;
-        node.style.position = 'relative';
-        canvas.width  = node.offsetWidth;
-        canvas.height = node.offsetHeight;
-        canvas.style.cssText =
-          'position:absolute;top:0;left:0;pointer-events:none;z-index:3;';
-        node.appendChild(canvas);
-        canvasRef.current = canvas;
-
-        // dragend: 드래그 끝난 후 재렌더 (좌표 정확)
-        window.kakao.maps.event.addListener(kakaoMap, 'dragend', redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed', redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded', redraw);
+        window.kakao.maps.event.addListener(kakaoMap, 'center_changed', redraw);
+        window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   redraw);
+        window.kakao.maps.event.addListener(kakaoMap, 'dragend',        redraw);
+        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    redraw);
         window.addEventListener('resize', redraw);
 
-        // GeoJSON 로드 후 초기 렌더
-        fetch('/seoul_grid.geojson')
-          .then(r => r.json())
-          .then(g => {
-            featuresRef.current = g.features;
-            redraw();
-          })
-          .catch(e => console.error('[GeoJSON]', e));
+        // GeoJSON + 전체 시간대 히트맵 한 번에 로드
+        Promise.all([
+          fetch('/seoul_grid.geojson').then(r => r.json()),
+          fetchHeatmap('now'),
+          fetchHeatmap('1h'),
+          fetchHeatmap('3h'),
+          fetchHeatmap('6h'),
+        ]).then(([geojson]) => {
+          featuresRef.current = geojson.features;
+          redraw();
+        }).catch(e => console.error('[MapPage init]', e));
       }
     }, 100);
-
     return () => clearInterval(wait);
   }, []);
 
-  // ── 시간 슬라이더 변경 ────────────────────────────────────────────────
   const handleTimeChange = (t) => {
     setSelectedTime(t);
     selectedTimeRef.current = t;
     setIsLoading(true);
-    setTimeout(() => {
-      redraw();
-      setIsLoading(false);
-    }, 300);
+    setTimeout(() => { redraw(); setIsLoading(false); }, 100);
   };
 
-  // ─────────────────────────────────────────────────────────────────────
   return (
     <div style={{ position: 'relative', height: '100%' }}>
+      <div style={{ position: 'absolute', inset: 0 }}>
+        <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+        <canvas ref={canvasRef} style={{
+          position: 'absolute', top: 0, left: 0,
+          width: '100%', height: '100%',
+          pointerEvents: 'none', zIndex: 3,
+        }} />
+      </div>
 
-      {/* 지도 */}
-      <div ref={mapRef} style={{ position: 'absolute', inset: 0 }} />
-
-      {/* 상단 헤더 카드 */}
+      {/* 상단 헤더 */}
       <div style={{
         position: 'absolute', top: 12, left: 12, right: 12,
         background: 'white', borderRadius: 16, padding: '12px 16px',
@@ -158,7 +167,7 @@ const MapPage = ({ userLocation }) => {
         </div>
       </div>
 
-      {/* 슬라이더 카드 */}
+      {/* 슬라이더 */}
       <div style={{
         position: 'absolute', top: 80, left: 12, right: 12,
         background: 'white', borderRadius: 16, padding: '14px 16px',
@@ -172,19 +181,13 @@ const MapPage = ({ userLocation }) => {
         </div>
         <div style={{ display: 'flex' }}>
           {TIME_STEPS.map((step) => (
-            <button
-              key={step.value}
-              onClick={() => handleTimeChange(step.value)}
-              style={{
-                flex: 1, padding: '8px 4px', border: 'none',
-                borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                background: selectedTime === step.value ? '#3B82F6' : 'transparent',
-                color: selectedTime === step.value ? 'white' : '#9CA3AF',
-                transition: 'all 0.2s',
-              }}
-            >
-              {step.label}
-            </button>
+            <button key={step.value} onClick={() => handleTimeChange(step.value)} style={{
+              flex: 1, padding: '8px 4px', border: 'none', borderRadius: 8,
+              cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              background: selectedTime === step.value ? '#3B82F6' : 'transparent',
+              color: selectedTime === step.value ? 'white' : '#9CA3AF',
+              transition: 'all 0.2s',
+            }}>{step.label}</button>
           ))}
         </div>
       </div>
@@ -205,19 +208,13 @@ const MapPage = ({ userLocation }) => {
         boxShadow: '0 -4px 20px rgba(0,0,0,0.1)', zIndex: 10,
         padding: '16px 20px 32px',
       }}>
-        <div style={{
-          width: 36, height: 4, background: '#E5E7EB',
-          borderRadius: 2, margin: '0 auto 16px',
-        }} />
+        <div style={{ width: 36, height: 4, background: '#E5E7EB', borderRadius: 2, margin: '0 auto 16px' }} />
         <div style={{ fontSize: 17, fontWeight: 700, color: '#111', marginBottom: 4 }}>실시간 침수 상황</div>
         <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 14 }}>실시간 감지된 침수 격자</div>
         <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
           {TIME_STEPS.map((step) => (
             <div key={step.value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{
-                width: 14, height: 14, borderRadius: 3,
-                background: HEATMAP_COLORS[step.value],
-              }} />
+              <div style={{ width: 14, height: 14, borderRadius: 3, background: HEATMAP_COLORS[step.value] }} />
               <span style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>{step.label}</span>
             </div>
           ))}
@@ -226,15 +223,11 @@ const MapPage = ({ userLocation }) => {
           <button style={{
             flex: 1, padding: '14px', background: '#3B82F6', color: 'white',
             border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer',
-          }}>
-            🛟 가까운 대피소
-          </button>
+          }}>🛟 가까운 대피소</button>
           <button style={{
             flex: 1, padding: '14px', background: '#F3F4F6', color: '#374151',
             border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer',
-          }}>
-            🔔 이 지역 알림
-          </button>
+          }}>🔔 이 지역 알림</button>
         </div>
       </div>
     </div>
