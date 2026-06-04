@@ -30,7 +30,7 @@ def load_shelters(file_path):
     engine = get_engine()
     
     insert_query = text("""
-        INSERT INTO shelter (name, address, shelter_type, geom)
+        INSERT INTO shelter (name, address, type, geom)
         VALUES (:name, :address, :type, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326));
     """)
     
@@ -56,7 +56,7 @@ def load_shelters(file_path):
                 connection.execute(insert_query, {
                     "name": str(name).strip(),
                     "address": str(address).strip() if pd.notna(address) else None,
-                    "shelter_type": shelter_type,
+                    "type": shelter_type,
                     "lon": float(lon),
                     "lat": float(lat)
                 })
