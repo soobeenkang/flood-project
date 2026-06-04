@@ -1,12 +1,13 @@
 // api/v1/alerts/alerts.service.js
-import { getCache } from '../../../services/redis.service.js';
+import redis from '../../../services/redis.service.js';
 
 /**
  * scheduler.service.js가 1분마다 'alerts:latest' 키에 저장해 둔 캐시 읽어 반환
  */
 export async function getAlerts(lat, lon, limit) {
-  const raw    = await getCache('alerts:latest');
-  const all    = Array.isArray(raw) ? raw : [];
+  const raw    = await redis.get('alerts:latest');
+  const parsed = raw ? JSON.parse(raw) : null;
+  const all    = Array.isArray(parsed) ? parsed : [];
 
   // 24시간 이내 필터
   const now    = Date.now();

@@ -1,5 +1,5 @@
-const pool = require('../../../db/pool');
-const { client: redis } = require('../../../db/redis');
+import pool from '../../../db/pool.js';
+import redis from '../../../services/redis.service.js';
 
 /**
  * Redis 센서 캐시 조회.
@@ -80,4 +80,4 @@ export async function checkFloodAtPoint(lat, lon) {
   return { isFlooded, gridId: String(gridId), source: 'prediction' };
 }
 
-module.exports = { checkFloodAtPoint };
+export default { checkFloodAtPoint };

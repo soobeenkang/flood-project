@@ -1,5 +1,5 @@
 import pool from '../../../db/pool.js';
-import { client as redis } from '../../../db/redis.js';
+import redis from '../../../services/redis.service.js';
 
 const HORIZON_MAP = { now: 0, '1h': 1, '3h': 3, '6h': 6 };
 const HORIZON_LABEL = { 0: 'now', 1: '1h', 3: '3h', 6: '6h' };

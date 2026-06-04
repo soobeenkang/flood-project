@@ -15,6 +15,7 @@ import alertsRouter from './api/v1/alerts/alerts.router.js';
 
 import errorHandler from './middlewares/errorHandler.js';
 import { initMqtt } from './services/mqtt.service.js';
+import { initWss } from './socket/wsManager.js';
 // import { initScheduler } from './services/scheduler.service.js';
 
 const app = express();
@@ -41,6 +42,6 @@ const server = http.createServer(app);
 // 인프라 초기화
 initMqtt();   // 아두이노 mqtt 구독 시작
 //initScheduler();  // cron 작업 등록
-initWss(httpServer);
+initWss(server);
 
 server.listen(3000, () => console.log('API listening on :3000'));

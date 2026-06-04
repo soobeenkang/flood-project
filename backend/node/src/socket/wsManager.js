@@ -1,4 +1,4 @@
-const { WebSocketServer } = require('ws');
+import { WebSocketServer } from 'ws';
 
 // channel → Set<WebSocket>
 const channels = {
@@ -73,4 +73,4 @@ function broadcast(channel, data) {
   });
 }
 
-module.exports = { initWss, broadcast };
+export { initWss, broadcast };

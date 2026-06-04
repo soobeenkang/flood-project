@@ -1,4 +1,4 @@
-const locationService = require('./location.service');
+import locationService from './location.service.js';
 
 async function floodCheck(req, res, next) {
   try {
@@ -25,4 +25,4 @@ async function floodCheck(req, res, next) {
   }
 }
 
-module.exports = { floodCheck };
+export { floodCheck };
