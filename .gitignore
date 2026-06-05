@@ -220,3 +220,6 @@ data/
 Thumbs.dbnode_modules/
 index.html.bak
 postman/
+node_modules/
+.env
+*.local
