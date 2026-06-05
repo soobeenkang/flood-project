@@ -70,6 +70,7 @@ services:
       MQTT_URL: mqtt://mosquitto:1883
       PYTHON_API_URL: http://python-api:8000
       JWT_SECRET: ${JWT_SECRET:-changeme}
+      A_SERVICE_KEY: ${A_SERVICE_KEY}
     depends_on:
       postgres:
         condition: service_healthy
