@@ -9,6 +9,7 @@ import sheltersRouter from './api/v1/shelter/shelters.router.js';
 import heatmapRouter from './api/v1/heatmap/heatmap.router.js';
 import locationRouter from './api/v1/location/location.router.js';
 import alertsRouter from './api/v1/alerts/alerts.router.js';
+import subscriptionRouter from './api/v1/subscriptions/subscriptions.router.js';
 // 미구현 라우터 주석
 // import evacuationRouter from './api/v1/evacuation/evacuation.router.js';
 // import adminRouter from './api/v1/admin/admin.router.js';
@@ -29,6 +30,7 @@ app.use('/api/v1/shelters', sheltersRouter);
 app.use('/api/v1/heatmap', heatmapRouter);
 app.use('/api/v1/location', locationRouter);
 app.use('/api/v1/alerts', alertsRouter);
+app.use('/api/v1/subscriptions', subscriptionRouter);
 
 /* TODO */
 //app.use('/api/v1/evacuation', evacuationRouter);
