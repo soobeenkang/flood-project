@@ -1,13 +1,13 @@
 """
 서울시 기상청 날씨 수집기 (실황 + 초단기예보 통합)
 
-실행 방법: python seoul_weather_collector.py --auth-key (인증키) --geojson (격자 geojson 파일 경로, 지정 안 할 시 같은 폴더 내에서 찾음)
+!!!! 실행 전 사용자 설정 상수 입력하기 !!!!
 
 ■ 사용 API
   - 실황  (odam): nph-dfs_odam_grd
   - 초단기(vsrt): nph-dfs_vsrt_grd
 
-■ 출력 컬럼 (Parquet)
+■ 출력 컬럼
   grid_id    : int32          서울 100m 격자 ID
   tmfc       : datetime64[us] 발표시각
 
@@ -23,8 +23,6 @@
   [초단기예보 — 하늘상태 +1h]
   sky_1h     : float32   1시간 후 하늘상태 (1=맑음, 2=구름조금, 3=구름많음, 4=흐림)
 
-
-■ 수집 주기 : 1시간 (--interval 옵션으로 변경 가능)
 ■ API 호출 횟수 / 사이클 : 실황 4회 + 초단기 7회 = 총 11회
 """
 
@@ -32,18 +30,38 @@ import json
 import math
 import time
 import logging
-import argparse
+import sys
 from datetime import datetime, timedelta
 from collections import deque
 
 import requests
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 
-# ────────────────────────────────────────────────
+
+# ════════════════════════════════════════════════
+#  사용자 설정 상수
+# ════════════════════════════════════════════════
+AUTH_KEY     = "auth key"
+GEOJSON_PATH = "서울격자 GeoJSON >>파일<< 경로 ex) ./seoul_grid.geojson"
+DB_DIR_PATH  = "db.py 파일 >>폴더<< 경로 ex) ./"
+INTERVAL     = 3600 # 수집 주기(sec)
+
+# ════════════════════════════════════════════════
+#  db.py 동적 경로 추가 및 임포트
+# ════════════════════════════════════════════════
+if DB_DIR_PATH not in sys.path:
+    sys.path.append(DB_DIR_PATH)
+
+try:
+    from db import get_engine
+
+except ImportError as e:
+    print(f"[오류] db.py를 찾을 수 없습니다. 에러: {e}")
+    sys.exit(1)
+
+# ════════════════════════════════════════════════
 # 로깅 설정
-# ────────────────────────────────────────────────
+# ════════════════════════════════════════════════
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -51,6 +69,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+DB_TABLE = "seoul_weather"
 
 # ════════════════════════════════════════════════
 # 1. Lambert Conformal Conic 투영 변환
@@ -311,7 +330,6 @@ def run_cycle(
     grid_mapping : pd.DataFrame,
     window       : GridWindow,
     auth_key     : str,
-    output_path  : str,
     tmfc         : str | None = None,
 ):
     """
@@ -378,56 +396,42 @@ def run_cycle(
     df_out = pd.DataFrame(data)
 
     # ── 8-4. Parquet 저장 ────────────────────────
-    table = pa.Table.from_pandas(df_out, preserve_index=False)
-    pq.write_table(table, output_path, compression="snappy")
-    logger.info("Parquet 저장 완료 → %s  (행: %d, 컬럼: %s)",
-                output_path, len(df_out), list(df_out.columns))
+    engine = get_engine()
+    with engine.begin() as conn:
+        df_out.to_sql(
+            name      = DB_TABLE,
+            con       = conn,
+            if_exists = "append",
+            index     = False,
+            method    = "multi",
+        )
+    logger.info("DB 저장 완료 → 테이블: %s  (행: %d)", DB_TABLE, len(df_out))
 
     return df_out
-
 
 # ════════════════════════════════════════════════
 # 9. 메인 루프 — 1시간 간격 반복 수집
 # ════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="서울시 기상청 실황+초단기예보 날씨 수집기"
-    )
-    parser.add_argument("--auth-key", required=True,  help="기상청 API 인증키")
-    parser.add_argument("--geojson",  default="seoul_grid.geojson",
-                        help="서울 격자 GeoJSON 경로")
-    parser.add_argument("--output",   default="seoul_weather.parquet",
-                        help="출력 Parquet 파일 경로")
-    parser.add_argument("--interval", type=int, default=3600,
-                        help="수집 주기(초), 기본 3600 = 1시간")
-    parser.add_argument("--run-once", action="store_true",
-                        help="1회만 실행하고 종료")
-    args = parser.parse_args()
-
     converter    = LCCConverter()
-    grid_mapping = build_grid_mapping(args.geojson, converter)
+    grid_mapping = build_grid_mapping(GEOJSON_PATH, converter)
     window       = GridWindow()
 
-    logger.info("수집 시작 (주기: %d초)", args.interval)
+    logger.info("수집 시작 (주기: %d초)", INTERVAL)
 
     while True:
         try:
             run_cycle(
                 grid_mapping = grid_mapping,
                 window       = window,
-                auth_key     = args.auth_key,
-                output_path  = args.output,
+                auth_key     = AUTH_KEY,
             )
         except Exception as exc:
             logger.error("사이클 오류: %s", exc, exc_info=True)
 
-        if args.run_once:
-            logger.info("--run-once 옵션으로 종료합니다.")
-            break
-
-        logger.info("다음 수집까지 %d초 대기...", args.interval)
-        time.sleep(args.interval)
+        logger.info("다음 수집까지 %d초 대기...", INTERVAL)
+        time.sleep(INTERVAL)
 
 
 if __name__ == "__main__":
