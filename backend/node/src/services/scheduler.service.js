@@ -1,6 +1,7 @@
 import axios from 'axios';
 import https from 'https';
 import redis from './redis.service.js';
+import pool from "../db/pool.js";
 
 const URL = 'https://www.safetydata.go.kr/V2/api/DSSP-IF-00247';
 
@@ -17,7 +18,58 @@ export function initScheduler() {
         await collectAlerts();
     }, 3 * 60 * 1000);
 }
+async function getWithRetry(url, config, retries = 3) {
+    for (let i = 1; i <= retries; i++) {
+        try {
+            return await axios.get(url, {
+                ...config,
+                timeout: 10000
+            });
+            if (i > 1) {
+                console.log(`재시도 ${i}회차 성공`);
+            }
+            
+        } catch (err) {
+            console.error(`API 호출 실패 (${i}/${retries})`, err.code);
 
+            if (i === retries) {
+                throw err;
+            }
+
+            await new Promise(resolve =>
+                setTimeout(resolve, 2000)
+            );
+        }
+    }
+}
+
+async function saveAlerts(alerts){
+    for (const alert of alerts) {
+        await pool.query(
+            `
+            INSERT INTO alerts (
+                source_sn,
+                region,
+                type,
+                level,
+                message,
+                issued_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (source_sn)
+            DO NOTHING
+            `,
+            [
+                alert.sourceSn,
+                alert.region,
+                alert.type,
+                alert.level,
+                alert.message,
+                alert.issuedAt
+            ]
+        );
+    }
+}
 async function collectAlerts() {
     try {
         const todayDate = new Date();
@@ -35,7 +87,9 @@ async function collectAlerts() {
             .slice(0, 10)
             .replace(/-/g, '');
 
-        const todayResponse = await axios.get(URL, {
+        // console.log('today 요청 시작');
+
+        const todayResponse = await getWithRetry(URL, {
             httpsAgent,
             params: {
                 serviceKey: process.env.A_SERVICE_KEY,
@@ -46,7 +100,16 @@ async function collectAlerts() {
                 rgnNm: '서울'
             }
         });
-        const yesterdayResponse = await axios.get(URL, {
+
+        // console.log('today 요청 성공');
+
+        // console.log('yesterday 요청 시작');
+
+        // console.log('today=', today);
+        // console.log('yesterday=', yesterday);
+        // console.log("KEY:", process.env.A_SERVICE_KEY);
+        // console.log("LEN:", process.env.A_SERVICE_KEY.length);
+        const yesterdayResponse = await getWithRetry(URL, {
             httpsAgent,
             params: {
                 serviceKey: process.env.A_SERVICE_KEY,
@@ -65,7 +128,6 @@ async function collectAlerts() {
             ...(todayResponse.data.body ?? []),
             ...(yesterdayResponse.data.body ?? [])
         ];
-        // const body = todayResponse.data.body ?? [];
 
         const alerts = body
             .filter(row =>
@@ -79,6 +141,10 @@ async function collectAlerts() {
                 message: row.MSG_CN,
                 issuedAt: row.CRT_DT
             }));
+        // console.log(
+        //     alerts.map(a => a.sourceSn)
+        // );
+        await saveAlerts(alerts);
         
         await redis.set(
             'alerts:latest',
@@ -92,3 +158,4 @@ async function collectAlerts() {
         console.error(err);
     }
 }
+
