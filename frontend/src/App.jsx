@@ -19,7 +19,7 @@ const NAV_ITEMS = [
 ];
 
 const USER_LOCATION = getRandomUserLocation();
-const USE_MOCK = true; // 백엔드 준비되면 false로 변경
+const USE_MOCK = false; // 백엔드 준비되면 false로 변경
 
 function App() {
   const [page, setPage]                       = useState('home');

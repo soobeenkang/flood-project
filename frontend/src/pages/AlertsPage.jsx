@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { MOCK_ALERTS } from '../data/mockData';
 import { getAlerts } from '../services/api';
 
-const USE_MOCK = true;
+const USE_MOCK = false;
 
 const formatTime = (isoString) => {
   const diff = Date.now() - new Date(isoString).getTime();
@@ -15,7 +15,7 @@ const formatTime = (isoString) => {
 };
 
 const AlertsPage = ({ userLocation }) => {
-  const [alerts, setAlerts]       = useState(MOCK_ALERTS);
+  const [alerts, setAlerts]       = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {

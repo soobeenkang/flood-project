@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MOCK_HEATMAP, HEATMAP_COLORS } from '../data/mockData';
 import { getHeatmapGrids } from '../services/api';
 
-const USE_MOCK = true;
+const USE_MOCK = false;
 
 const TIME_STEPS = [
   { label: '현재',  value: 'now' },

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MOCK_HEATMAP, HEATMAP_COLORS } from '../data/mockData';
 import { getEvacRoute } from '../services/api';
 
-const USE_MOCK = true;
+const USE_MOCK = false;
 
 const RoutePage = ({ userLocation, shelter }) => {
   const mapRef        = useRef(null);
