@@ -16,7 +16,7 @@ export async function getAlerts(lat, lon, limit) {
     // 캐싱 데이터 없을 시 db에서 조회
     console.log('Redis 캐시 미스. DB에서 재난문자 조회');
     const dbResult = await pool.query(
-      `SELECT source_sn AS "sourceSN", region, type, level, message, issued_at AS "issuedAT"
+      `SELECT source_sn AS "sourceSN", region, type, level, message, issued_at AS "issuedAt"
       FROM alerts
       WHERE issued_at >= NOW() - INTERVAL '24 hours'
       ORDER BY issued_at DESC

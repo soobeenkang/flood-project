@@ -8,3 +8,4 @@ shapely>=2.0
 uvicorn
 fastapi
 openpyxl
+pyarrow

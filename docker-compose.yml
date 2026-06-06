@@ -81,6 +81,7 @@ services:
     volumes:
       - ./backend/node:/app
       - /app/node_modules
+      - ./frontend/dist:/app/frontend/dist
 
   python-api:
     build:
