@@ -1,4 +1,4 @@
-const HomePage = ({ weather, onNavigate }) => {
+const HomePage = ({ weather, alertBadge = 0, onNavigate }) => {
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: '#F0F4FF' }}>
       {/* 날씨 헤더 */}
@@ -55,7 +55,7 @@ const HomePage = ({ weather, onNavigate }) => {
           { icon: '🌧️', bg: '#EFF6FF', title: '침수 예측 지도', desc: '우리 동네 침수 위험 한눈에 보기', page: 'map' },
           { icon: '🧭', bg: '#F0F9FF', title: '침수 피하는 경로', desc: '목적지까지 안전한 길 안내', page: 'route' },
           { icon: '🛟', bg: '#F0FDF4', title: '가까운 대피소 조회', desc: '학교 · 공공기관 · 호텔', page: 'shelter' },
-          { icon: '🔔', bg: '#FFF7ED', title: '경보', desc: '지금 우리 지역 활성 경보', page: 'alert', badge: 2 },
+          { icon: '🔔', bg: '#FFF7ED', title: '경보', desc: '지금 우리 지역 활성 경보', page: 'alert', badge: alertBadge },
         ].map((item) => (
           <button key={item.page} onClick={() => onNavigate(item.page)} style={{
             display: 'flex', alignItems: 'center', gap: 14,
@@ -70,7 +70,7 @@ const HomePage = ({ weather, onNavigate }) => {
               fontSize: 26, flexShrink: 0, position: 'relative',
             }}>
               {item.icon}
-              {item.badge && (
+              {item.badge > 0 && (
                 <div style={{
                   position: 'absolute', top: -4, right: -4,
                   width: 18, height: 18, background: '#EF4444',
