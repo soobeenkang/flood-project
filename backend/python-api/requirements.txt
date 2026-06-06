@@ -7,7 +7,4 @@ python-dotenv>=1.0
 shapely>=2.0
 uvicorn
 fastapi
-<<<<<<< HEAD
 openpyxl
-=======
->>>>>>> feature/be
