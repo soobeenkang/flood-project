@@ -11,6 +11,7 @@ import locationRouter from './api/v1/location/location.router.js';
 import alertsRouter from './api/v1/alerts/alerts.router.js';
 import subscriptionsRouter from './api/v1/subscriptions/subscriptions.router.js';
 import evacuationRouter from './api/v1/evacuation/evacuation.router.js';
+import weatherRouter from './api/v1/weather/weather.router.js';
 // 미구현 라우터 주석
 // import adminRouter from './api/v1/admin/admin.router.js';
 
@@ -32,6 +33,7 @@ app.use('/api/v1/location', locationRouter);
 app.use('/api/v1/alerts', alertsRouter);
 app.use('/api/v1/subscriptions', subscriptionsRouter);
 app.use('/api/v1/route', evacuationRouter);
+app.use('/api/v1/weather', weatherRouter);
 
 /* TODO */
 //app.use('/api/v1/evacuation', evacuationRouter);
