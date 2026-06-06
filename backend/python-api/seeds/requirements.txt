@@ -5,3 +5,4 @@ psycopg2-binary
 pyarrow
 python-dotenv
 geoalchemy2
+openpyxl
