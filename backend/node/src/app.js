@@ -9,8 +9,9 @@ import sheltersRouter from './api/v1/shelter/shelters.router.js';
 import heatmapRouter from './api/v1/heatmap/heatmap.router.js';
 import locationRouter from './api/v1/location/location.router.js';
 import alertsRouter from './api/v1/alerts/alerts.router.js';
+import subscriptionsRouter from './api/v1/subscriptions/subscriptions.router.js';
+import evacuationRouter from './api/v1/evacuation/evacuation.router.js';
 // 미구현 라우터 주석
-// import evacuationRouter from './api/v1/evacuation/evacuation.router.js';
 // import adminRouter from './api/v1/admin/admin.router.js';
 
 import errorHandler from './middlewares/errorHandler.js';
@@ -29,6 +30,8 @@ app.use('/api/v1/shelters', sheltersRouter);
 app.use('/api/v1/heatmap', heatmapRouter);
 app.use('/api/v1/location', locationRouter);
 app.use('/api/v1/alerts', alertsRouter);
+app.use('/api/v1/subscriptions', subscriptionsRouter);
+app.use('/api/v1/route', evacuationRouter);
 
 /* TODO */
 //app.use('/api/v1/evacuation', evacuationRouter);
@@ -41,7 +44,7 @@ const server = http.createServer(app);
 
 // 인프라 초기화
 initMqtt();   // 아두이노 mqtt 구독 시작
-initScheduler();  // cron 작업 등록
 initWss(server);
+initScheduler();  // cron 작업 등록
 
 server.listen(3000, () => console.log('API listening on :3000'));
