@@ -144,14 +144,18 @@ async function collectAlerts() {
         // console.log(
         //     alerts.map(a => a.sourceSn)
         // );
-        await saveAlerts(alerts);
-        
-        await redis.set(
-            'alerts:latest',
-            JSON.stringify(alerts)
-        );
 
-        console.log(`재난문자 ${alerts.length}건 저장`);
+        if (alerts.length > 0){
+            await saveAlerts(alerts);
+            await redis.set(
+                'alerts:latest',
+                JSON.stringify(alerts)
+            );
+            console.log(`재난문자 ${alerts.length}건 저장`);
+        } else {
+            console.log('[스케줄러] 최근 24내 재난문자 데이터 없음.');
+        }
+        
 
     } catch (err) {
         console.error('재난문자 API 호출 실패');
