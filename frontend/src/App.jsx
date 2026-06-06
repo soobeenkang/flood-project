@@ -71,7 +71,7 @@ function App() {
   const renderPage = () => {
     switch (page) {
       case 'home':       return <HomePage weather={weather} alertBadge={alertBadge} onNavigate={setPage} />;
-      case 'map':        return <MapPage userLocation={USER_LOCATION} />;
+      case 'map':        return <MapPage userLocation={USER_LOCATION} onNavigateShelter={() => setPage('shelter')} />;
       case 'shelter':    return <ShelterPage userLocation={USER_LOCATION} onNavigateRoute={handleShelterToRoute} />;
       case 'route':      return <RoutePage userLocation={USER_LOCATION} shelter={selectedShelter} />;
       case 'guidelines': return <GuidelinesPage />;

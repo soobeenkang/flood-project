@@ -19,7 +19,7 @@ const SHOW_FROM = {
 };
 const LAYER_ORDER = ['6h', '3h', '1h', 'now'];
 
-const MapPage = ({ userLocation }) => {
+const MapPage = ({ userLocation, onNavigateShelter }) => {
   const mapRef          = useRef(null);
   const canvasRef       = useRef(null);
   const kakaoMapRef     = useRef(null);
@@ -403,7 +403,7 @@ const MapPage = ({ userLocation }) => {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button style={{
+            <button onClick={onNavigateShelter} style={{
               flex: 1, padding: '14px', background: '#3B82F6', color: 'white',
               border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer',
             }}>🛟 가까운 대피소</button>

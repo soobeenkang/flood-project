@@ -82,8 +82,16 @@ const RoutePage = ({ userLocation, shelter }) => {
 
     if (!shelter) return;
     const dest = shelter;
+    const destLat = dest.lat;
+    const destLon = dest.lon ?? dest.lng;
+    if (destLat === undefined || destLon === undefined) {
+      setRouteInfo(null);
+      setRouteError('선택한 대피소의 좌표 정보가 없습니다.');
+      return;
+    }
+
     const origin  = new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng);
-    const destPos = new window.kakao.maps.LatLng(dest.lat, dest.lon ?? dest.lng);
+    const destPos = new window.kakao.maps.LatLng(destLat, destLon);
 
     // 경로 좌표 (API 응답 waypoints 또는 직선)
     const path = waypoints && waypoints.length > 0
@@ -139,14 +147,22 @@ const RoutePage = ({ userLocation, shelter }) => {
     setRouteError(null);
     try {
       const dest = shelter;
+      const destLat = dest.lat;
+      const destLon = dest.lon ?? dest.lng;
+      if (destLat === undefined || destLon === undefined) {
+        setRouteInfo(null);
+        setRouteError('선택한 대피소의 좌표 정보가 없습니다.');
+        return;
+      }
+
       const data = await getEvacRoute(
         userLocation.lat, userLocation.lng,
-        dest.lat, dest.lon ?? dest.lng,
+        destLat, destLon,
         mode
       );
       setRouteInfo({
-        totalMinutes:  data.totalMinutes,
-        totalDistance: data.totalDistance,
+        totalMinutes:  data.totalMinutes ?? 0,
+        totalDistance: data.totalDistance ?? 0,
         avoidedGrids:  data.avoidedGrids,
         desc: mode === 'avoid_flood'
           ? `침수구역 ${data.avoidedGrids}곳을 우회해요`
@@ -156,7 +172,13 @@ const RoutePage = ({ userLocation, shelter }) => {
           : '침수구역을 통과할 수 있습니다. 주의하세요.',
         waypoints: data.waypoints ?? [],
       });
-      if (kakaoMapRef.current) drawRoute(kakaoMapRef.current, data.waypoints ?? []);
+      if (kakaoMapRef.current) {
+        try {
+          drawRoute(kakaoMapRef.current, data.waypoints ?? []);
+        } catch (drawError) {
+          console.error('[RoutePage drawRoute]', drawError);
+        }
+      }
     } catch (e) {
       console.error('[RoutePage]', e);
       setRouteInfo(null);
