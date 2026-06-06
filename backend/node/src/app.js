@@ -29,7 +29,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/*
+
 // API 라우터 마운트
 app.use('/api/v1/sensors', sensorRouter);
 app.use('/api/v1/shelters', sheltersRouter);
@@ -37,10 +37,9 @@ app.use('/api/v1/heatmap', heatmapRouter);
 app.use('/api/v1/location', locationRouter);
 app.use('/api/v1/alerts', alertsRouter);
 app.use('/api/v1/subscriptions', subscriptionsRouter);
-app.use('/api/v1/route', evacuationRouter);
-app.use('/api/v1/evacuation', evacuationRouter);
-*/
+app.use('/api/v1/route/evacuation', evacuationRouter);
 
+/*
 // 경로 수정 버전
 app.use('/sensors', sensorRouter);
 app.use('/shelters', sheltersRouter);
@@ -49,8 +48,7 @@ app.use('/location', locationRouter);
 app.use('/alerts', alertsRouter);
 app.use('/subscriptions', subscriptionsRouter);
 app.use('/route', evacuationRouter);
-app.use('/evacuation', evacuationRouter);
-
+*/
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
 
 app.get('*', (req, res) => {
