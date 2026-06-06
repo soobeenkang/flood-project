@@ -16,12 +16,37 @@ const normalizeGrid = (grid) => ({
   lng: grid.lng ?? grid.lon,
 });
 
+const normalizeShelterType = (type, shelter = {}) => {
+  const raw = [
+    type,
+    shelter.name,
+    shelter.address,
+    shelter.title,
+    shelter.addr,
+    shelter.명칭,
+    shelter.주소,
+  ].map((value) => String(value ?? '').trim().toLowerCase()).join(' ');
+
+  if (!raw) return 'public';
+  if (['school', '학교', '초등학교', '중학교', '고등학교', '대학교'].some((value) => raw.includes(value))) {
+    return 'school';
+  }
+  if (['hotel', '호텔', '숙박', '모텔'].some((value) => raw.includes(value))) {
+    return 'hotel';
+  }
+  if (['public', '공공', '기관', '구청', '주민센터', '센터', '체육관', '복지관'].some((value) => raw.includes(value))) {
+    return 'public';
+  }
+  return raw;
+};
+
 const normalizeShelter = (shelter) => ({
   ...shelter,
   id: shelter.id ?? shelter.shelter_id ?? shelter.shelterId,
   shelter_id: shelter.shelter_id ?? shelter.id ?? shelter.shelterId,
   name: shelter.name ?? shelter.title ?? shelter.명칭,
-  type: shelter.type ?? shelter.category ?? shelter.유형,
+  type: normalizeShelterType(shelter.type ?? shelter.category ?? shelter.유형, shelter),
+  rawType: shelter.type ?? shelter.category ?? shelter.유형,
   address: shelter.address ?? shelter.addr ?? shelter.주소,
   lat: shelter.lat ?? shelter.latitude ?? shelter.위도,
   lon: shelter.lon ?? shelter.lng ?? shelter.longitude ?? shelter.경도,
@@ -102,33 +127,19 @@ export const getHeatmapGrids = (lat, lon, horizon = 'now', radius = 5000) =>
 // ── 대피소 ────────────────────────────────────────────────────────────────
 // type: 'all' | 'school' | 'public' | 'hotel'
 export const getShelters = (lat, lon, type = 'all', radius = 3000) =>
-  request('GET', '/shelters', { lat, lon, type: type === 'all' ? undefined : type, radius })
+  request('GET', '/shelters', { lat, lon, radius })
     .then((data) => ({
       ...data,
-      shelters: asArray(data.shelters ?? data.items ?? data).map(normalizeShelter),
+      shelters: asArray(data.shelters ?? data.items ?? data)
+        .map(normalizeShelter)
+        .filter((shelter) => type === 'all' || shelter.type === type),
     }));
 
 // ── 경로 ──────────────────────────────────────────────────────────────────
 // mode: 'avoid_flood' | 'fastest'
 export const getEvacRoute = (originLat, originLon, destLat, destLon, mode = 'avoid_flood') => {
-  const body = {
-    originLat,
-    originLon,
-    destLat,
-    destLon,
-    mode,
-    origin: { lat: originLat, lon: originLon, lng: originLon },
-    destination: { lat: destLat, lon: destLon, lng: destLon },
-  };
-
-  return request('POST', '/route/evacuation', null, body)
-    .catch((error) => {
-      if ([400, 404, 405, 422].includes(error.status)) {
-        return request('POST', '/evacuation/route', null, body);
-      }
-      throw error;
-    })
-    .then(normalizeRoute);
+  const params = { startLat: originLat, startLon: originLon, endLat: destLat, endLon: destLon, mode };
+  return request('GET', '/route/evacuation', params).then(normalizeRoute);
 };
 
 // ── 경보 ──────────────────────────────────────────────────────────────────

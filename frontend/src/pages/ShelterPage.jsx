@@ -16,6 +16,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const [selectedShelter, setSelectedShelter] = useState(null);
   const [shelters, setShelters]               = useState([]);
   const [isLoading, setIsLoading]             = useState(false);
+  const [mapReady, setMapReady]               = useState(false);
 
   // ── 대피소 API fetch ──────────────────────────────────────────────────
   const fetchShelters = async (type = 'all') => {
@@ -157,6 +158,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         ]).then(([geojson]) => {
           featuresRef.current = geojson.features;
           drawCanvas();
+          setMapReady(true);
         }).catch(e => console.error('[ShelterPage init]', e));
       }
     }, 100);
@@ -171,7 +173,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   // ── 선택 변경 시 마커 갱신 ────────────────────────────────────────────
   useEffect(() => {
     if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
-  }, [selectedShelter, shelters]);
+  }, [selectedShelter, shelters, mapReady]);
 
   useEffect(() => {
     if (!selectedShelter) return;

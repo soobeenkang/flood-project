@@ -208,6 +208,12 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     setTimeout(() => { redraw(); setIsLoading(false); }, 100);
   };
 
+  const handleShelterClick = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onNavigateShelter?.();
+  };
+
   // 구독 등록
   const handleSubscribe = async () => {
     if (!email || !selectedGridId) return;
@@ -403,7 +409,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
             ))}
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
-            <button onClick={onNavigateShelter} style={{
+            <button onClick={handleShelterClick} style={{
               flex: 1, padding: '14px', background: '#3B82F6', color: 'white',
               border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: 'pointer',
             }}>🛟 가까운 대피소</button>
