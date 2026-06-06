@@ -1,30 +1,50 @@
 import { useEffect, useRef, useState } from 'react';
-import { MOCK_HEATMAP, HEATMAP_COLORS } from '../data/mockData';
-import { getEvacRoute } from '../services/api';
-
-const USE_MOCK = false;
+import { HEATMAP_COLORS, SHELTER_TYPES } from '../data/mockData';
+import { getEvacRoute, getHeatmapGrids, getShelters } from '../services/api';
 
 const RoutePage = ({ userLocation, shelter }) => {
   const mapRef        = useRef(null);
   const canvasRef     = useRef(null);
   const kakaoMapRef   = useRef(null);
   const featuresRef   = useRef(null);
+  const floodIdsRef   = useRef(new Set());
   const rafRef        = useRef(null);
   const polylineRef   = useRef(null);
   const myMarkerRef   = useRef(null);
   const destMarkerRef = useRef(null);
+  const shelterMarkersRef = useRef([]);
 
   const [routeMode, setRouteMode] = useState('avoid_flood');
   const [routeInfo, setRouteInfo] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isShelterLoading, setIsShelterLoading] = useState(false);
+  const [routeError, setRouteError] = useState(null);
+  const [shelters, setShelters] = useState([]);
+  const [selectedShelter, setSelectedShelter] = useState(shelter ?? null);
 
-  const MOCK_ROUTE = {
-    avoid_flood: { totalMinutes: 34, totalDistance: 9100, avoidedGrids: 3,
-      desc: '침수구역 3곳을 우회해요', detail: '침수 위험 구역을 피해 안전한 경로로 안내합니다.',
-      waypoints: [] },
-    fastest:     { totalMinutes: 20, totalDistance: 8400, avoidedGrids: 0,
-      desc: '최단 경로로 안내해요', detail: '침수구역을 통과할 수 있습니다. 주의하세요.',
-      waypoints: [] },
+  const fetchShelters = async () => {
+    setIsShelterLoading(true);
+    try {
+      const data = await getShelters(userLocation.lat, userLocation.lng, 'all', 3000);
+      setShelters(data.shelters ?? []);
+    } catch (e) {
+      console.error('[RoutePage] 대피소 fetch 실패:', e);
+      setShelters([]);
+    } finally {
+      setIsShelterLoading(false);
+    }
+  };
+
+  const fetchCurrentHeatmap = async () => {
+    try {
+      const data = await getHeatmapGrids(userLocation.lat, userLocation.lng, 'now', 5000);
+      floodIdsRef.current = new Set(
+        (data.grids ?? []).filter(g => g.isFlooded).map(g => g.grid_id)
+      );
+    } catch (e) {
+      console.error('[RoutePage] 히트맵 fetch 실패:', e);
+      floodIdsRef.current = new Set();
+    }
   };
 
   const redraw = () => {
@@ -50,7 +70,7 @@ const RoutePage = ({ userLocation, shelter }) => {
       const lngToX = (lng) => (lng - sw.getLng()) / (ne.getLng() - sw.getLng()) * W;
       const latToY = (lat) => (1 - (lat - sw.getLat()) / (ne.getLat() - sw.getLat())) * H;
 
-      const currentIds = new Set(MOCK_HEATMAP.now);
+      const currentIds = floodIdsRef.current;
       features.forEach((feature) => {
         const { grid_id, lon, lat } = feature.properties;
         if (!currentIds.has(grid_id)) return;
@@ -77,13 +97,22 @@ const RoutePage = ({ userLocation, shelter }) => {
     if (myMarkerRef.current)    myMarkerRef.current.setMap(null);
     if (destMarkerRef.current)  destMarkerRef.current.setMap(null);
 
-    const dest = shelter ?? { lat: 37.5172, lon: 127.0473, name: '정신여자고등학교' };
+    if (!selectedShelter) return;
+    const dest = selectedShelter;
+    const destLat = dest.lat;
+    const destLon = dest.lon ?? dest.lng;
+    if (destLat === undefined || destLon === undefined) {
+      setRouteInfo(null);
+      setRouteError('선택한 대피소의 좌표 정보가 없습니다.');
+      return;
+    }
+
     const origin  = new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng);
-    const destPos = new window.kakao.maps.LatLng(dest.lat, dest.lon ?? dest.lng);
+    const destPos = new window.kakao.maps.LatLng(destLat, destLon);
 
     // 경로 좌표 (API 응답 waypoints 또는 직선)
     const path = waypoints && waypoints.length > 0
-      ? waypoints.map(w => new window.kakao.maps.LatLng(w.lat, w.lon))
+      ? waypoints.map(w => new window.kakao.maps.LatLng(w.lat, w.lon ?? w.lng))
       : [origin, destPos];
 
     const polyline = new window.kakao.maps.Polyline({
@@ -106,7 +135,9 @@ const RoutePage = ({ userLocation, shelter }) => {
     myEl.appendChild(Object.assign(document.createElement('div'), {
       style: 'width:8px;height:8px;background:#EF4444;border-radius:50%;',
     }));
-    new window.kakao.maps.CustomOverlay({ position: origin, content: myEl, zIndex: 5 }).setMap(kakaoMap);
+    const myMarker = new window.kakao.maps.CustomOverlay({ position: origin, content: myEl, zIndex: 5 });
+    myMarker.setMap(kakaoMap);
+    myMarkerRef.current = myMarker;
 
     // 목적지 마커
     const destEl = document.createElement('div');
@@ -124,25 +155,66 @@ const RoutePage = ({ userLocation, shelter }) => {
     kakaoMap.setBounds(new window.kakao.maps.LatLngBounds(origin, destPos));
   };
 
-  const fetchRoute = async (mode) => {
+  const addShelterMarkers = (kakaoMap) => {
+    shelterMarkersRef.current.forEach(marker => marker.setMap(null));
+    shelterMarkersRef.current = [];
+
+    shelters.forEach((item) => {
+      const lat = item.lat;
+      const lon = item.lon ?? item.lng;
+      if (lat === undefined || lon === undefined) return;
+
+      const isSelected = selectedShelter?.id === item.id;
+      const el = document.createElement('button');
+      el.type = 'button';
+      el.style.cssText = `
+        width:${isSelected ? 46 : 38}px;height:${isSelected ? 46 : 38}px;
+        border-radius:50%;border:3px solid ${isSelected ? '#2563EB' : '#E5E7EB'};
+        background:${isSelected ? '#3B82F6' : 'white'};
+        display:flex;align-items:center;justify-content:center;
+        font-size:${isSelected ? 22 : 18}px;cursor:pointer;
+        box-shadow:0 2px 8px rgba(0,0,0,0.16);
+      `;
+      el.innerHTML = SHELTER_TYPES[item.type]?.emoji ?? '🏢';
+      el.addEventListener('click', () => setSelectedShelter(item));
+
+      const marker = new window.kakao.maps.CustomOverlay({
+        position: new window.kakao.maps.LatLng(lat, lon),
+        content: el,
+        zIndex: isSelected ? 8 : 6,
+      });
+      marker.setMap(kakaoMap);
+      shelterMarkersRef.current.push(marker);
+    });
+  };
+
+  const fetchRoute = async (mode, destination = selectedShelter) => {
+    if (!destination) {
+      setRouteInfo(null);
+      setRouteError('지도나 목록에서 대피소를 선택해주세요.');
+      return;
+    }
+
     setIsLoading(true);
+    setRouteError(null);
     try {
-      if (USE_MOCK) {
-        await new Promise(r => setTimeout(r, 400));
-        const info = MOCK_ROUTE[mode];
-        setRouteInfo(info);
-        if (kakaoMapRef.current) drawRoute(kakaoMapRef.current, info.waypoints);
+      const dest = destination;
+      const destLat = dest.lat;
+      const destLon = dest.lon ?? dest.lng;
+      if (destLat === undefined || destLon === undefined) {
+        setRouteInfo(null);
+        setRouteError('선택한 대피소의 좌표 정보가 없습니다.');
         return;
       }
-      const dest = shelter ?? { lat: 37.5172, lon: 127.0473 };
+
       const data = await getEvacRoute(
         userLocation.lat, userLocation.lng,
-        dest.lat, dest.lon ?? dest.lng,
+        destLat, destLon,
         mode
       );
       setRouteInfo({
-        totalMinutes:  data.totalMinutes,
-        totalDistance: data.totalDistance,
+        totalMinutes:  data.totalMinutes ?? 0,
+        totalDistance: data.totalDistance ?? 0,
         avoidedGrids:  data.avoidedGrids,
         desc: mode === 'avoid_flood'
           ? `침수구역 ${data.avoidedGrids}곳을 우회해요`
@@ -152,9 +224,17 @@ const RoutePage = ({ userLocation, shelter }) => {
           : '침수구역을 통과할 수 있습니다. 주의하세요.',
         waypoints: data.waypoints ?? [],
       });
-      if (kakaoMapRef.current) drawRoute(kakaoMapRef.current, data.waypoints ?? []);
+      if (kakaoMapRef.current) {
+        try {
+          drawRoute(kakaoMapRef.current, data.waypoints ?? []);
+        } catch (drawError) {
+          console.error('[RoutePage drawRoute]', drawError);
+        }
+      }
     } catch (e) {
       console.error('[RoutePage]', e);
+      setRouteInfo(null);
+      setRouteError('경로 정보를 불러오지 못했습니다.');
     } finally {
       setIsLoading(false);
     }
@@ -175,24 +255,43 @@ const RoutePage = ({ userLocation, shelter }) => {
         window.kakao.maps.event.addListener(kakaoMap, 'dragend',        redraw);
         window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    redraw);
 
-        fetch('/seoul_grid.geojson')
-          .then(r => r.json())
-          .then(g => {
-            featuresRef.current = g.features;
-            redraw();
-            fetchRoute(routeMode);
-          });
+        Promise.all([
+          fetch('/seoul_grid.geojson').then(r => r.json()),
+          fetchCurrentHeatmap(),
+          fetchShelters(),
+        ]).then(([geojson]) => {
+          featuresRef.current = geojson.features;
+          redraw();
+          if (selectedShelter) fetchRoute(routeMode, selectedShelter);
+        }).catch(e => console.error('[RoutePage init]', e));
       }
     }, 100);
     return () => clearInterval(wait);
   }, []);
 
+  useEffect(() => {
+    if (shelter) setSelectedShelter(shelter);
+  }, [shelter]);
+
+  useEffect(() => {
+    if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
+  }, [shelters, selectedShelter]);
+
+  useEffect(() => {
+    if (selectedShelter) {
+      fetchRoute(routeMode, selectedShelter);
+    } else {
+      setRouteInfo(null);
+      setRouteError(null);
+    }
+  }, [selectedShelter]);
+
   const handleModeChange = (mode) => {
     setRouteMode(mode);
-    fetchRoute(mode);
+    fetchRoute(mode, selectedShelter);
   };
 
-  const dest = shelter ?? { name: '정신여자고등학교' };
+  const dest = selectedShelter;
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
@@ -221,7 +320,7 @@ const RoutePage = ({ userLocation, shelter }) => {
           <div>
             <div style={{ fontSize: 11, color: '#9CA3AF' }}>도착지</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: '#111' }}>
-              {dest.name} {routeInfo ? `· ${(routeInfo.totalDistance / 1000).toFixed(1)}km` : ''}
+              {dest?.name ?? '목적지 미선택'} {routeInfo ? `· ${(routeInfo.totalDistance / 1000).toFixed(1)}km` : ''}
             </div>
           </div>
         </div>
@@ -263,8 +362,52 @@ const RoutePage = ({ userLocation, shelter }) => {
       }}>
         <div style={{ width: 36, height: 4, background: '#E5E7EB', borderRadius: 2, margin: '0 auto 16px' }} />
 
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#111' }}>대피소 선택</div>
+            <div style={{ fontSize: 12, color: '#9CA3AF' }}>
+              {isShelterLoading ? '불러오는 중…' : `${shelters.length}곳`}
+            </div>
+          </div>
+          <div style={{
+            display: 'flex', gap: 8, overflowX: 'auto',
+            paddingBottom: 2, scrollbarWidth: 'none',
+          }}>
+            {shelters.length === 0 && !isShelterLoading ? (
+              <div style={{ fontSize: 13, color: '#9CA3AF', padding: '8px 0' }}>
+                표시할 대피소가 없어요
+              </div>
+            ) : shelters.map((item) => {
+              const isSelected = selectedShelter?.id === item.id;
+              return (
+                <button
+                  key={item.id ?? item.name}
+                  onClick={() => setSelectedShelter(item)}
+                  style={{
+                    flex: '0 0 auto', maxWidth: 180, padding: '9px 12px',
+                    border: `1.5px solid ${isSelected ? '#3B82F6' : '#E5E7EB'}`,
+                    borderRadius: 12, background: isSelected ? '#EFF6FF' : 'white',
+                    color: '#111', cursor: 'pointer', textAlign: 'left',
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {(SHELTER_TYPES[item.type]?.emoji ?? '🏢')} {item.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#6B7280', marginTop: 3 }}>
+                    {item.distance !== undefined ? `${item.distance}m` : item.status ?? '대피소'}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {isLoading ? (
           <div style={{ textAlign: 'center', padding: '20px 0', color: '#9CA3AF' }}>경로 탐색 중…</div>
+        ) : routeError ? (
+          <div style={{ textAlign: 'center', padding: '20px 0', color: '#6B7280', fontSize: 14 }}>
+            {routeError}
+          </div>
         ) : routeInfo && (
           <>
             <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>

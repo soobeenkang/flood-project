@@ -1,17 +1,58 @@
 import { useEffect, useRef, useState } from 'react';
-import { MOCK_HEATMAP, HEATMAP_COLORS, MOCK_SHELTERS, SHELTER_TYPES } from '../data/mockData';
+import { HEATMAP_COLORS, SHELTER_TYPES } from '../data/mockData';
+import { getHeatmapGrids, getShelters } from '../services/api';
 
 const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const mapRef      = useRef(null);
   const canvasRef   = useRef(null);
   const kakaoMapRef = useRef(null);
   const featuresRef = useRef(null);
+  const floodIdsRef = useRef(new Set());
   const rafRef      = useRef(null);
   const markersRef  = useRef([]);
+  const requestSeqRef = useRef(0);
 
   const [filterType, setFilterType]           = useState('all');
   const [selectedShelter, setSelectedShelter] = useState(null);
+  const [shelters, setShelters]               = useState([]);
+  const [isLoading, setIsLoading]             = useState(false);
+  const [mapReady, setMapReady]               = useState(false);
 
+  // ── 대피소 API fetch ──────────────────────────────────────────────────
+  const fetchShelters = async (type = 'all') => {
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
+    setIsLoading(true);
+    try {
+      const data = await getShelters(userLocation.lat, userLocation.lng, type, 3000);
+      if (requestSeq === requestSeqRef.current) {
+        setShelters(data.shelters ?? []);
+      }
+    } catch (e) {
+      console.error('[ShelterPage] 대피소 fetch 실패:', e);
+      if (requestSeq === requestSeqRef.current) {
+        setShelters([]);
+      }
+    } finally {
+      if (requestSeq === requestSeqRef.current) {
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const fetchCurrentHeatmap = async () => {
+    try {
+      const data = await getHeatmapGrids(userLocation.lat, userLocation.lng, 'now', 5000);
+      floodIdsRef.current = new Set(
+        (data.grids ?? []).filter(g => g.isFlooded).map(g => g.grid_id)
+      );
+    } catch (e) {
+      console.error('[ShelterPage] 히트맵 fetch 실패:', e);
+      floodIdsRef.current = new Set();
+    }
+  };
+
+  // ── Canvas 렌더링 ─────────────────────────────────────────────────────
   const drawCanvas = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
@@ -35,8 +76,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
       const lngToX = (lng) => (lng - sw.getLng()) / (ne.getLng() - sw.getLng()) * W;
       const latToY = (lat) => (1 - (lat - sw.getLat()) / (ne.getLat() - sw.getLat())) * H;
 
-      // 대피소 화면에서는 현재 침수 그리드만 표시
-      const currentIds = new Set(MOCK_HEATMAP.now);
+      const currentIds = floodIdsRef.current;
       features.forEach((feature) => {
         const { grid_id, lon, lat } = feature.properties;
         if (!currentIds.has(grid_id)) return;
@@ -58,17 +98,18 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     });
   };
 
+  // ── 대피소 마커 ───────────────────────────────────────────────────────
   const addShelterMarkers = (kakaoMap) => {
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
 
-    const filtered = filterType === 'all'
-      ? MOCK_SHELTERS
-      : MOCK_SHELTERS.filter(s => s.type === filterType);
+    shelters.forEach((shelter) => {
+      const lat = shelter.lat;
+      const lon = shelter.lon ?? shelter.lng;
+      if (lat === undefined || lon === undefined) return;
 
-    filtered.forEach((shelter) => {
-      const el = document.createElement('div');
       const isSelected = selectedShelter?.id === shelter.id;
+      const el = document.createElement('div');
       el.style.cssText = `
         width: ${isSelected ? 52 : 40}px;
         height: ${isSelected ? 52 : 40}px;
@@ -85,7 +126,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
       el.addEventListener('click', () => setSelectedShelter(shelter));
 
       const marker = new window.kakao.maps.CustomOverlay({
-        position: new window.kakao.maps.LatLng(shelter.lat, shelter.lon),
+        position: new window.kakao.maps.LatLng(lat, lon),
         content: el,
         zIndex: 5,
       });
@@ -94,6 +135,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     });
   };
 
+  // ── 카카오맵 초기화 ───────────────────────────────────────────────────
   useEffect(() => {
     const wait = setInterval(() => {
       if (window.kakao && window.kakao.maps) {
@@ -110,25 +152,37 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         window.kakao.maps.event.addListener(kakaoMap, 'dragend',        drawCanvas);
         window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    drawCanvas);
 
-        fetch('/seoul_grid.geojson')
-          .then(r => r.json())
-          .then(g => {
-            featuresRef.current = g.features;
-            drawCanvas();
-            addShelterMarkers(kakaoMap);
-          });
+        Promise.all([
+          fetch('/seoul_grid.geojson').then(r => r.json()),
+          fetchCurrentHeatmap(),
+        ]).then(([geojson]) => {
+          featuresRef.current = geojson.features;
+          drawCanvas();
+          setMapReady(true);
+        }).catch(e => console.error('[ShelterPage init]', e));
       }
     }, 100);
     return () => clearInterval(wait);
   }, []);
 
+  // ── 필터 변경 시 ──────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchShelters(filterType);
+  }, [filterType]);
+
+  // ── 선택 변경 시 마커 갱신 ────────────────────────────────────────────
   useEffect(() => {
     if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
-  }, [filterType, selectedShelter]);
+  }, [selectedShelter, shelters, mapReady]);
+
+  useEffect(() => {
+    if (!selectedShelter) return;
+    const stillVisible = shelters.some((item) => item.id === selectedShelter.id);
+    if (!stillVisible) setSelectedShelter(null);
+  }, [shelters, selectedShelter]);
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
-      {/* 지도 */}
       <div style={{ position: 'absolute', inset: 0 }}>
         <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
         <canvas ref={canvasRef} style={{
@@ -157,6 +211,16 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         ))}
       </div>
 
+      {/* 로딩 */}
+      {isLoading && (
+        <div style={{
+          position: 'absolute', top: '50%', left: '50%',
+          transform: 'translate(-50%,-50%)',
+          background: 'rgba(0,0,0,0.55)', color: 'white',
+          padding: '8px 16px', borderRadius: 20, fontSize: 13, zIndex: 10,
+        }}>불러오는 중…</div>
+      )}
+
       {/* 선택된 대피소 패널 */}
       {selectedShelter && (
         <div style={{
@@ -169,7 +233,6 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
             width: 36, height: 4, background: '#E5E7EB',
             borderRadius: 2, margin: '0 auto 16px',
           }} />
-
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
             <div style={{
               width: 52, height: 52, borderRadius: 14,
@@ -187,11 +250,11 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
                 }}>{selectedShelter.status}</span>
               </div>
               <div style={{ fontSize: 13, color: '#6B7280' }}>
-                📍 {selectedShelter.distance}m &nbsp;·&nbsp; 🚶 도보 약 {selectedShelter.walkMinutes}분
+                📍 {selectedShelter.distance}m &nbsp;·&nbsp;
+                🚶 도보 약 {selectedShelter.walkMinutes}분
               </div>
             </div>
           </div>
-
           <button onClick={() => onNavigateRoute(selectedShelter)} style={{
             width: '100%', padding: '15px', background: '#3B82F6', color: 'white',
             border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 700, cursor: 'pointer',

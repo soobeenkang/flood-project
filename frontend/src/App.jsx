@@ -26,16 +26,21 @@ function App() {
   const [showAlert, setShowAlert]             = useState(false);
   const [selectedShelter, setSelectedShelter] = useState(null);
   const [weather, setWeather]                 = useState(MOCK_WEATHER);
-  const [alertBadge, setAlertBadge]           = useState(2);
+  const [alertBadge, setAlertBadge]           = useState(0);
 
   // ── 앱 초기화: 위치 기반 침수 여부 + 날씨 fetch ──────────────────────
   useEffect(() => {
+    const { lat, lng } = USER_LOCATION;
+
+    // 경보 건수
+    getAlerts(lat, lng, 50)
+      .then(data => setAlertBadge(data.alerts?.length ?? 0))
+      .catch(() => setAlertBadge(0));
+
     if (USE_MOCK) {
       setShowAlert(MOCK_WEATHER.isFlooded);
       return;
     }
-
-    const { lat, lng } = USER_LOCATION;
 
     // 침수 여부 확인
     checkFlood(lat, lng)
@@ -56,10 +61,6 @@ function App() {
       }))
       .catch(() => {}); // 실패 시 Mock 유지
 
-    // 경보 건수
-    getAlerts(lat, lng, 50)
-      .then(data => setAlertBadge(data.alerts?.length ?? 0))
-      .catch(() => {});
   }, []);
 
   const handleShelterToRoute = (shelter) => {
@@ -69,8 +70,8 @@ function App() {
 
   const renderPage = () => {
     switch (page) {
-      case 'home':       return <HomePage weather={weather} onNavigate={setPage} />;
-      case 'map':        return <MapPage userLocation={USER_LOCATION} />;
+      case 'home':       return <HomePage weather={weather} alertBadge={alertBadge} onNavigate={setPage} />;
+      case 'map':        return <MapPage userLocation={USER_LOCATION} onNavigateShelter={() => setPage('shelter')} />;
       case 'shelter':    return <ShelterPage userLocation={USER_LOCATION} onNavigateRoute={handleShelterToRoute} />;
       case 'route':      return <RoutePage userLocation={USER_LOCATION} shelter={selectedShelter} />;
       case 'guidelines': return <GuidelinesPage />;
