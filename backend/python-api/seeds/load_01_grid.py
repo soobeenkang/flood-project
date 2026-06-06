@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATA_DIR = "data"
-GRID_FILE = f"{DATA_DIR}/grid/seoul_grid.geojson"
+GRID_FILE = f"{DATA_DIR}/seoul_grid.geojson"
 ELEV_FILE = f"{DATA_DIR}/seoul_grid_with_elevation.parquet"
 RIVER_FILE = f"{DATA_DIR}/seoul_grid_with_river_flag.parquet"
 
