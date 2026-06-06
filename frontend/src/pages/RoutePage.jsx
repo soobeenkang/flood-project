@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MOCK_HEATMAP, HEATMAP_COLORS } from '../data/mockData';
 import { getEvacRoute } from '../services/api';
 
-const USE_MOCK = true;
+const USE_MOCK = false;
 
 const RoutePage = ({ userLocation, shelter }) => {
   const mapRef        = useRef(null);
@@ -83,7 +83,7 @@ const RoutePage = ({ userLocation, shelter }) => {
 
     // 경로 좌표 (API 응답 waypoints 또는 직선)
     const path = waypoints && waypoints.length > 0
-      ? waypoints.map(w => new window.kakao.maps.LatLng(w.lat, w.lon))
+      ? waypoints.map(w => new window.kakao.maps.LatLng(w.lat, w.lon ?? w.lng))
       : [origin, destPos];
 
     const polyline = new window.kakao.maps.Polyline({

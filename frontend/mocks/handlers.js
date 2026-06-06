@@ -5,9 +5,9 @@ const BASE = 'http://localhost:3000/api/v1';
 
 export const handlers = [
   // ── 히트맵 ───────────────────────────────────────────────────────────────
-  http.get(`${BASE}/flood/heatmap`, ({ request }) => {
+  http.get(`${BASE}/heatmap/grids`, ({ request }) => {
     const url = new URL(request.url);
-    const t = url.searchParams.get('t') ?? '';
+    const t = url.searchParams.get('horizon') ?? 'now';
 
     const data = heatmapFixture[t] ?? heatmapFixture.current;
 
@@ -32,20 +32,29 @@ export const handlers = [
   }),
 
   // ── 대피경로 ─────────────────────────────────────────────────────────────
-  http.post(`${BASE}/evacuation/route`, async ({ request }) => {
+  http.post(`${BASE}/route/evacuation`, async ({ request }) => {
     const body = await request.json();
-    const { origin } = body;
+    const origin = {
+      lat: body.originLat ?? body.origin?.lat,
+      lng: body.originLon ?? body.origin?.lng,
+    };
 
     // Mock 경로: 출발지 → 임시 대피소 (서울시청)
     return HttpResponse.json({
-      path: [
+      waypoints: [
         { lat: origin.lat, lng: origin.lng },
         { lat: origin.lat + 0.005, lng: origin.lng + 0.005 },
         { lat: 37.5665, lng: 126.978 },
       ],
-      distance: 1200, // m
-      duration: 15,   // 분
+      totalDistance: 1200, // m
+      totalMinutes: 15,    // 분
+      avoidedGrids: 0,
     });
+  }),
+
+  // ── 이메일 알림 구독 ───────────────────────────────────────────────────
+  http.post(`${BASE}/subscriptions`, async () => {
+    return HttpResponse.json({ ok: true }, { status: 201 });
   }),
 
   // ── 관리자 상태 ───────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { MOCK_HEATMAP, HEATMAP_COLORS } from '../data/mockData';
-import { getHeatmapGrids } from '../services/api';
+import { getHeatmapGrids, subscribeToGrid } from '../services/api';
 
-const USE_MOCK = true;
+const USE_MOCK = false;
 
 const TIME_STEPS = [
   { label: '현재',  value: 'now' },
@@ -121,7 +121,7 @@ const MapPage = ({ userLocation }) => {
     const { lat, lng } = userLocation;
     const data = await getHeatmapGrids(lat, lng, horizon, 5000);
     floodIdsRef.current[horizon] = new Set(
-      data.grids.filter(g => g.isflooded).map(g => g.id)
+      data.grids.filter(g => g.isFlooded).map(g => g.grid_id)
     );
   };
 
@@ -217,13 +217,8 @@ const MapPage = ({ userLocation }) => {
         setSubmitStatus('success');
         return;
       }
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/subscriptions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gridId: String(selectedGridId), email }),
-      });
-      if (res.ok) setSubmitStatus('success');
-      else        setSubmitStatus('error');
+      await subscribeToGrid(selectedGridId, email);
+      setSubmitStatus('success');
     } catch {
       setSubmitStatus('error');
     }

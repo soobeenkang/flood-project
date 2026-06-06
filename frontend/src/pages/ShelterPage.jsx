@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { MOCK_HEATMAP, HEATMAP_COLORS, MOCK_SHELTERS, SHELTER_TYPES } from '../data/mockData';
+import { getShelters } from '../services/api';
 
 const USE_MOCK = false;
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 
 const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const mapRef      = useRef(null);
@@ -27,14 +27,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     }
     setIsLoading(true);
     try {
-      const params = new URLSearchParams({
-        lat:    userLocation.lat,
-        lon:    userLocation.lng,
-        radius: 3000,
-        ...(type !== 'all' && { type }),
-      });
-      const res  = await fetch(`${API_BASE}/api/v1/shelters?${params}`);
-      const data = await res.json();
+      const data = await getShelters(userLocation.lat, userLocation.lng, type, 3000);
       setShelters(data.shelters ?? []);
     } catch (e) {
       console.error('[ShelterPage] 대피소 fetch 실패:', e);
