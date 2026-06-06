@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { MOCK_HEATMAP, HEATMAP_COLORS, MOCK_SHELTERS, SHELTER_TYPES } from '../data/mockData';
 
+const USE_MOCK = false;
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+
 const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const mapRef      = useRef(null);
   const canvasRef   = useRef(null);
@@ -9,9 +12,39 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const rafRef      = useRef(null);
   const markersRef  = useRef([]);
 
-  const [filterType, setFilterType]     = useState('all');
+  const [filterType, setFilterType]           = useState('all');
   const [selectedShelter, setSelectedShelter] = useState(null);
+  const [shelters, setShelters]               = useState(MOCK_SHELTERS);
+  const [isLoading, setIsLoading]             = useState(false);
 
+  // ── 대피소 API fetch ──────────────────────────────────────────────────
+  const fetchShelters = async (type = 'all') => {
+    if (USE_MOCK) {
+      setShelters(
+        type === 'all' ? MOCK_SHELTERS : MOCK_SHELTERS.filter(s => s.type === type)
+      );
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const params = new URLSearchParams({
+        lat:    userLocation.lat,
+        lon:    userLocation.lng,
+        radius: 3000,
+        ...(type !== 'all' && { type }),
+      });
+      const res  = await fetch(`${API_BASE}/api/v1/shelters?${params}`);
+      const data = await res.json();
+      setShelters(data.shelters ?? []);
+    } catch (e) {
+      console.error('[ShelterPage] 대피소 fetch 실패:', e);
+      setShelters(MOCK_SHELTERS); // 실패 시 Mock으로 fallback
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ── Canvas 렌더링 ─────────────────────────────────────────────────────
   const drawCanvas = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(() => {
@@ -20,16 +53,22 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
       const features = featuresRef.current;
       if (!canvas || !kakaoMap || !features) return;
 
-      const ctx = canvas.getContext('2d');
+      canvas.width  = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+
+      const ctx    = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const bounds = kakaoMap.getBounds();
       const sw     = bounds.getSouthWest();
       const ne     = bounds.getNorthEast();
-      const proj   = kakaoMap.getProjection();
+      const W      = canvas.width;
+      const H      = canvas.height;
 
-      // 대피소 화면에서는 현재 침수 그리드만 표시
-      const currentIds = new Set(MOCK_HEATMAP.current);
+      const lngToX = (lng) => (lng - sw.getLng()) / (ne.getLng() - sw.getLng()) * W;
+      const latToY = (lat) => (1 - (lat - sw.getLat()) / (ne.getLat() - sw.getLat())) * H;
+
+      const currentIds = new Set(MOCK_HEATMAP.now);
       features.forEach((feature) => {
         const { grid_id, lon, lat } = feature.properties;
         if (!currentIds.has(grid_id)) return;
@@ -39,29 +78,26 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         const coords = feature.geometry.coordinates[0];
         ctx.beginPath();
         coords.forEach(([lng, la], i) => {
-          const pt = proj.pointFromCoords(new window.kakao.maps.LatLng(la, lng));
-          if (i === 0) ctx.moveTo(pt.x, pt.y);
-          else         ctx.lineTo(pt.x, pt.y);
+          const x = lngToX(lng);
+          const y = latToY(la);
+          if (i === 0) ctx.moveTo(x, y);
+          else         ctx.lineTo(x, y);
         });
         ctx.closePath();
-        ctx.fillStyle = HEATMAP_COLORS.current;
+        ctx.fillStyle = HEATMAP_COLORS.now;
         ctx.fill();
       });
     });
   };
 
+  // ── 대피소 마커 ───────────────────────────────────────────────────────
   const addShelterMarkers = (kakaoMap) => {
-    // 기존 마커 제거
     markersRef.current.forEach(m => m.setMap(null));
     markersRef.current = [];
 
-    const filtered = filterType === 'all'
-      ? MOCK_SHELTERS
-      : MOCK_SHELTERS.filter(s => s.type === filterType);
-
-    filtered.forEach((shelter) => {
-      const el = document.createElement('div');
+    shelters.forEach((shelter) => {
       const isSelected = selectedShelter?.id === shelter.id;
+      const el = document.createElement('div');
       el.style.cssText = `
         width: ${isSelected ? 52 : 40}px;
         height: ${isSelected ? 52 : 40}px;
@@ -78,7 +114,10 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
       el.addEventListener('click', () => setSelectedShelter(shelter));
 
       const marker = new window.kakao.maps.CustomOverlay({
-        position: new window.kakao.maps.LatLng(shelter.lat, shelter.lng),
+        position: new window.kakao.maps.LatLng(
+          shelter.lat,
+          shelter.lon ?? shelter.lng  // lon 또는 lng 둘 다 대응
+        ),
         content: el,
         zIndex: 5,
       });
@@ -87,6 +126,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     });
   };
 
+  // ── 카카오맵 초기화 ───────────────────────────────────────────────────
   useEffect(() => {
     const wait = setInterval(() => {
       if (window.kakao && window.kakao.maps) {
@@ -98,44 +138,48 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         });
         kakaoMapRef.current = kakaoMap;
 
-        const canvas = document.createElement('canvas');
-        const node   = mapRef.current;
-        canvas.width  = node.offsetWidth;
-        canvas.height = node.offsetHeight;
-        canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:3;';
-        node.appendChild(canvas);
-        canvasRef.current = canvas;
-
-        const redraw = () => drawCanvas();
-        const resize = () => {
-          canvas.width  = node.offsetWidth;
-          canvas.height = node.offsetHeight;
-          drawCanvas();
-        };
-        window.kakao.maps.event.addListener(kakaoMap, 'center_changed', redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed', resize);
-        window.kakao.maps.event.addListener(kakaoMap, 'drag', redraw);
+        window.kakao.maps.event.addListener(kakaoMap, 'center_changed', drawCanvas);
+        window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   drawCanvas);
+        window.kakao.maps.event.addListener(kakaoMap, 'dragend',        drawCanvas);
+        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    drawCanvas);
 
         fetch('/seoul_grid.geojson')
           .then(r => r.json())
           .then(g => {
             featuresRef.current = g.features;
             drawCanvas();
-            addShelterMarkers(kakaoMap);
           });
+
+        fetchShelters('all').then(() => {
+          if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
+        });
       }
     }, 100);
     return () => clearInterval(wait);
   }, []);
 
+  // ── 필터 변경 시 ──────────────────────────────────────────────────────
+  useEffect(() => {
+    fetchShelters(filterType).then(() => {
+      if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
+    });
+  }, [filterType]);
+
+  // ── 선택 변경 시 마커 갱신 ────────────────────────────────────────────
   useEffect(() => {
     if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
-  }, [filterType, selectedShelter]);
+  }, [selectedShelter, shelters]);
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
-      {/* 지도 */}
-      <div ref={mapRef} style={{ position: 'absolute', inset: 0 }} />
+      <div style={{ position: 'absolute', inset: 0 }}>
+        <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+        <canvas ref={canvasRef} style={{
+          position: 'absolute', top: 0, left: 0,
+          width: '100%', height: '100%',
+          pointerEvents: 'none', zIndex: 3,
+        }} />
+      </div>
 
       {/* 필터 탭 */}
       <div style={{
@@ -143,22 +187,28 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         display: 'flex', gap: 8, zIndex: 10,
       }}>
         {Object.entries(SHELTER_TYPES).map(([key, val]) => (
-          <button
-            key={key}
-            onClick={() => setFilterType(key)}
-            style={{
-              padding: '8px 14px', border: 'none', borderRadius: 20,
-              fontSize: 13, fontWeight: 600, cursor: 'pointer',
-              background: filterType === key ? '#3B82F6' : 'white',
-              color: filterType === key ? 'white' : '#374151',
-              boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <button key={key} onClick={() => setFilterType(key)} style={{
+            padding: '8px 14px', border: 'none', borderRadius: 20,
+            fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            background: filterType === key ? '#3B82F6' : 'white',
+            color: filterType === key ? 'white' : '#374151',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+            whiteSpace: 'nowrap',
+          }}>
             {val.emoji} {val.label}
           </button>
         ))}
       </div>
+
+      {/* 로딩 */}
+      {isLoading && (
+        <div style={{
+          position: 'absolute', top: '50%', left: '50%',
+          transform: 'translate(-50%,-50%)',
+          background: 'rgba(0,0,0,0.55)', color: 'white',
+          padding: '8px 16px', borderRadius: 20, fontSize: 13, zIndex: 10,
+        }}>불러오는 중…</div>
+      )}
 
       {/* 선택된 대피소 패널 */}
       {selectedShelter && (
@@ -172,7 +222,6 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
             width: 36, height: 4, background: '#E5E7EB',
             borderRadius: 2, margin: '0 auto 16px',
           }} />
-
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
             <div style={{
               width: 52, height: 52, borderRadius: 14,
@@ -190,18 +239,15 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
                 }}>{selectedShelter.status}</span>
               </div>
               <div style={{ fontSize: 13, color: '#6B7280' }}>
-                📍 {selectedShelter.distance}m &nbsp;·&nbsp; 🚶 도보 약 {selectedShelter.duration}분
+                📍 {selectedShelter.distance}m &nbsp;·&nbsp;
+                🚶 도보 약 {selectedShelter.walkMinutes}분
               </div>
             </div>
           </div>
-
-          <button
-            onClick={() => onNavigateRoute(selectedShelter)}
-            style={{
-              width: '100%', padding: '15px', background: '#3B82F6', color: 'white',
-              border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 700, cursor: 'pointer',
-            }}
-          >
+          <button onClick={() => onNavigateRoute(selectedShelter)} style={{
+            width: '100%', padding: '15px', background: '#3B82F6', color: 'white',
+            border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 700, cursor: 'pointer',
+          }}>
             🧭 대피 경로 안내
           </button>
         </div>
