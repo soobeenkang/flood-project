@@ -23,9 +23,9 @@ const normalizeShelter = (shelter) => ({
   name: shelter.name ?? shelter.title ?? shelter.명칭,
   type: shelter.type ?? shelter.category ?? shelter.유형,
   address: shelter.address ?? shelter.addr ?? shelter.주소,
-  lat: shelter.lat,
-  lon: shelter.lon ?? shelter.lng,
-  lng: shelter.lng ?? shelter.lon,
+  lat: shelter.lat ?? shelter.latitude ?? shelter.위도,
+  lon: shelter.lon ?? shelter.lng ?? shelter.longitude ?? shelter.경도,
+  lng: shelter.lng ?? shelter.lon ?? shelter.longitude ?? shelter.경도,
   status: shelter.status ?? shelter.operationStatus ?? shelter.운영상태 ?? '운영중',
 });
 
@@ -46,12 +46,18 @@ const normalizeRoute = (data) => {
     hasFloodedSegment: data.hasFloodedSegment ?? properties.hasFloodedSegment ?? false,
     nodeCount: data.nodeCount ?? properties.nodeCount,
     edgeCount: data.edgeCount ?? properties.edgeCount,
-    waypoints: waypoints.map((point) => ({
-      ...point,
-      lat: point.lat,
-      lon: point.lon ?? point.lng,
-      lng: point.lng ?? point.lon,
-    })),
+    waypoints: waypoints.map((point) => {
+      if (Array.isArray(point)) {
+        const [lon, lat] = point;
+        return { lat, lon, lng: lon };
+      }
+      return {
+        ...point,
+        lat: point.lat ?? point.latitude,
+        lon: point.lon ?? point.lng ?? point.longitude,
+        lng: point.lng ?? point.lon ?? point.longitude,
+      };
+    }),
   };
 };
 
@@ -96,7 +102,7 @@ export const getHeatmapGrids = (lat, lon, horizon = 'now', radius = 5000) =>
 // ── 대피소 ────────────────────────────────────────────────────────────────
 // type: 'all' | 'school' | 'public' | 'hotel'
 export const getShelters = (lat, lon, type = 'all', radius = 3000) =>
-  request('GET', '/shelters', { lat, lon, type, radius })
+  request('GET', '/shelters', { lat, lon, type: type === 'all' ? undefined : type, radius })
     .then((data) => ({
       ...data,
       shelters: asArray(data.shelters ?? data.items ?? data).map(normalizeShelter),
@@ -104,10 +110,26 @@ export const getShelters = (lat, lon, type = 'all', radius = 3000) =>
 
 // ── 경로 ──────────────────────────────────────────────────────────────────
 // mode: 'avoid_flood' | 'fastest'
-export const getEvacRoute = (originLat, originLon, destLat, destLon, mode = 'avoid_flood') =>
-  request('POST', '/route/evacuation', null, {
-    originLat, originLon, destLat, destLon, mode,
-  }).then(normalizeRoute);
+export const getEvacRoute = (originLat, originLon, destLat, destLon, mode = 'avoid_flood') => {
+  const body = {
+    originLat,
+    originLon,
+    destLat,
+    destLon,
+    mode,
+    origin: { lat: originLat, lon: originLon, lng: originLon },
+    destination: { lat: destLat, lon: destLon, lng: destLon },
+  };
+
+  return request('POST', '/route/evacuation', null, body)
+    .catch((error) => {
+      if ([400, 404, 405, 422].includes(error.status)) {
+        return request('POST', '/evacuation/route', null, body);
+      }
+      throw error;
+    })
+    .then(normalizeRoute);
+};
 
 // ── 경보 ──────────────────────────────────────────────────────────────────
 export const getAlerts = (lat, lon, limit = 50) =>

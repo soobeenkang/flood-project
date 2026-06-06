@@ -10,6 +10,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const floodIdsRef = useRef(new Set());
   const rafRef      = useRef(null);
   const markersRef  = useRef([]);
+  const requestSeqRef = useRef(0);
 
   const [filterType, setFilterType]           = useState('all');
   const [selectedShelter, setSelectedShelter] = useState(null);
@@ -18,15 +19,23 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
 
   // ── 대피소 API fetch ──────────────────────────────────────────────────
   const fetchShelters = async (type = 'all') => {
+    const requestSeq = requestSeqRef.current + 1;
+    requestSeqRef.current = requestSeq;
     setIsLoading(true);
     try {
       const data = await getShelters(userLocation.lat, userLocation.lng, type, 3000);
-      setShelters(data.shelters ?? []);
+      if (requestSeq === requestSeqRef.current) {
+        setShelters(data.shelters ?? []);
+      }
     } catch (e) {
       console.error('[ShelterPage] 대피소 fetch 실패:', e);
-      setShelters([]);
+      if (requestSeq === requestSeqRef.current) {
+        setShelters([]);
+      }
     } finally {
-      setIsLoading(false);
+      if (requestSeq === requestSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -94,6 +103,10 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     markersRef.current = [];
 
     shelters.forEach((shelter) => {
+      const lat = shelter.lat;
+      const lon = shelter.lon ?? shelter.lng;
+      if (lat === undefined || lon === undefined) return;
+
       const isSelected = selectedShelter?.id === shelter.id;
       const el = document.createElement('div');
       el.style.cssText = `
@@ -112,10 +125,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
       el.addEventListener('click', () => setSelectedShelter(shelter));
 
       const marker = new window.kakao.maps.CustomOverlay({
-        position: new window.kakao.maps.LatLng(
-          shelter.lat,
-          shelter.lon ?? shelter.lng  // lon 또는 lng 둘 다 대응
-        ),
+        position: new window.kakao.maps.LatLng(lat, lon),
         content: el,
         zIndex: 5,
       });
@@ -144,11 +154,9 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         Promise.all([
           fetch('/seoul_grid.geojson').then(r => r.json()),
           fetchCurrentHeatmap(),
-          fetchShelters('all'),
         ]).then(([geojson]) => {
           featuresRef.current = geojson.features;
           drawCanvas();
-          if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
         }).catch(e => console.error('[ShelterPage init]', e));
       }
     }, 100);
@@ -157,15 +165,19 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
 
   // ── 필터 변경 시 ──────────────────────────────────────────────────────
   useEffect(() => {
-    fetchShelters(filterType).then(() => {
-      if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
-    });
+    fetchShelters(filterType);
   }, [filterType]);
 
   // ── 선택 변경 시 마커 갱신 ────────────────────────────────────────────
   useEffect(() => {
     if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
   }, [selectedShelter, shelters]);
+
+  useEffect(() => {
+    if (!selectedShelter) return;
+    const stillVisible = shelters.some((item) => item.id === selectedShelter.id);
+    if (!stillVisible) setSelectedShelter(null);
+  }, [shelters, selectedShelter]);
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
