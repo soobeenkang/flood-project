@@ -1,0 +1,231 @@
+import pool from '../../../db/pool.js';
+import redis from '../../../services/redis.service.js';
+
+const FLOOD_PENALTY = 999999; // 침수 엣지 페널티 (m 단위 cost 기준)
+
+// ── 침수 엣지 ID 수집 ─────────────────────────────────────────
+//
+// 우선순위: Redis 캐시(sensor) → sensor_log DB → flood_prediction
+// 침수된 grid_id 를 모은 뒤, road_edge_grid 로 엣지 ID 로 변환.
+
+async function getFloodedEdgeIds() {
+  const floodedGridIds = new Set();
+
+  // 1) Redis 캐시 스캔 (아두이노 센서 최우선)
+  try {
+    for await (const key of redis.scanIterator({ MATCH: 'sensor:grid:*', COUNT: 200 })) {
+      const raw = await redis.get(key);
+      if (!raw) continue;
+      const data = JSON.parse(raw);
+      if (data.isFlooded) floodedGridIds.add(key.split(':')[2]);
+    }
+  } catch (err) {
+    console.warn('[route] Redis scan failed:', err.message);
+  }
+
+  // 2) Redis miss 된 그리드 → sensor_log DB fallback
+  //    (Redis TTL 만료 등 대비, 최신 1건이 침수인 grid 추가)
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (grid_id) grid_id, is_flooded
+       FROM sensor_log
+       ORDER BY grid_id, recorded_at DESC`,
+    );
+    rows.forEach((r) => {
+      const id = String(r.grid_id);
+      if (r.is_flooded && !floodedGridIds.has(id)) floodedGridIds.add(id);
+    });
+  } catch (err) {
+    console.warn('[route] sensor_log fallback failed:', err.message);
+  }
+
+  // 3) flood_prediction (horizon=0) — 센서 없는 그리드 보완
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT ON (grid_id) grid_id
+       FROM flood_prediction
+       WHERE horizon = 0 AND is_flooded = 1
+       ORDER BY grid_id, predicted_at DESC`,
+    );
+    rows.forEach((r) => floodedGridIds.add(String(r.grid_id)));
+  } catch (err) {
+    console.warn('[route] flood_prediction fallback failed:', err.message);
+  }
+
+  if (floodedGridIds.size === 0) return [];
+
+  // grid_id → edge_id 변환
+  const { rows: edgeRows } = await pool.query(
+    `SELECT DISTINCT edge_id
+     FROM road_edge_grid
+     WHERE grid_id = ANY($1::bigint[])`,
+    [[...floodedGridIds]],
+  );
+
+  return edgeRows.map((r) => String(r.edge_id));
+}
+
+// ── 좌표 → 가장 가까운 노드 ID ───────────────────────────────
+
+async function nearestNode(lat, lon) {
+  const { rows } = await pool.query(
+    `SELECT from_node AS node_id
+     FROM road_edge
+     ORDER BY ST_StartPoint(geom) <-> ST_SetSRID(ST_MakePoint($2, $1), 4326)
+     LIMIT 1`,
+    [lat, lon],
+  );
+  return rows.length > 0 ? rows[0].node_id : null;
+}
+
+// ── pgr_aStar 실행 ────────────────────────────────────────────
+
+async function runAStar(startNode, endNode, floodedEdgeIds) {
+  const hasFlooded = floodedEdgeIds.length > 0;
+
+  // 침수 엣지 ID 를 SQL 배열 리터럴로 바인딩
+  // cost: 침수 엣지면 distance_m + FLOOD_PENALTY, 아니면 distance_m
+  const sql = `
+    SELECT
+      path_seq,
+      node,
+      edge,
+      agg_cost
+    FROM pgr_aStar(
+      $1::text,
+      $2::bigint,
+      $3::bigint,
+      directed => false
+    )
+  `;
+
+  // pgr_aStar 첫 번째 인자: 엣지 쿼리 문자열 (동적 생성)
+  const edgeQuery = hasFlooded
+    ? `
+      SELECT
+        edge_id          AS id,
+        from_node        AS source,
+        to_node          AS target,
+        distance_m + CASE
+          WHEN edge_id = ANY(ARRAY[${floodedEdgeIds.map((id) => `${id}`).join(',')}]::bigint[])
+          THEN ${FLOOD_PENALTY}
+          ELSE 0
+        END              AS cost,
+        distance_m + CASE
+          WHEN edge_id = ANY(ARRAY[${floodedEdgeIds.map((id) => `${id}`).join(',')}]::bigint[])
+          THEN ${FLOOD_PENALTY}
+          ELSE 0
+        END              AS reverse_cost,
+        ST_X(ST_StartPoint(geom)) AS x1,
+        ST_Y(ST_StartPoint(geom)) AS y1,
+        ST_X(ST_EndPoint(geom))   AS x2,
+        ST_Y(ST_EndPoint(geom))   AS y2
+      FROM road_edge
+      `
+    : `
+      SELECT
+        edge_id          AS id,
+        from_node        AS source,
+        to_node          AS target,
+        distance_m       AS cost,
+        distance_m       AS reverse_cost,
+        ST_X(ST_StartPoint(geom)) AS x1,
+        ST_Y(ST_StartPoint(geom)) AS y1,
+        ST_X(ST_EndPoint(geom))   AS x2,
+        ST_Y(ST_EndPoint(geom))   AS y2
+      FROM road_edge
+      `;
+
+  const { rows } = await pool.query(sql, [edgeQuery, startNode, endNode]);
+  return rows;
+}
+
+// ── 경로 엣지 geom → GeoJSON coordinates ─────────────────────
+
+async function buildGeometry(edgeIds) {
+  if (edgeIds.length === 0) return [];
+
+  const { rows } = await pool.query(
+    `SELECT
+       edge_id,
+       ST_AsGeoJSON(geom)::json AS geom
+     FROM road_edge
+     WHERE edge_id = ANY($1::bigint[])`,
+    [edgeIds],
+  );
+
+  // edge_id → coordinates 맵
+  const geomMap = new Map(
+    rows.map((r) => [String(r.edge_id), r.geom.coordinates]),
+  );
+
+  // 경로 순서대로 좌표 이어붙이기 (중복 첫점 제거)
+  const coords = [];
+  for (const edgeId of edgeIds) {
+    const seg = geomMap.get(String(edgeId));
+    if (!seg) continue;
+    if (coords.length === 0) coords.push(...seg);
+    else coords.push(...seg.slice(1));
+  }
+  return coords;
+}
+
+// ── 공개 서비스 함수 ──────────────────────────────────────────
+
+export async function findEvacuationRoute(startLat, startLon, endLat, endLon) {
+  // 병렬: 침수 엣지 수집 + 시작/끝 노드 탐색
+  const [floodedEdgeIds, startNode, endNode] = await Promise.all([
+    getFloodedEdgeIds(),
+    nearestNode(startLat, startLon),
+    nearestNode(endLat, endLon),
+  ]);
+
+  if (!startNode || !endNode) return null;
+  if (startNode === endNode) return null;
+
+  const pathRows = await runAStar(startNode, endNode, floodedEdgeIds);
+  if (pathRows.length === 0) return null;
+
+  // -1 은 목적지 도착 행 (edge 없음) — 제외
+  const edgeIds = pathRows
+    .filter((r) => r.edge !== -1)
+    .map((r) => String(r.edge));
+
+  const totalCostM = pathRows[pathRows.length - 1]?.agg_cost ?? 0;
+
+  // 실제 도로 거리 (페널티 제외)
+  const { rows: distRows } = await pool.query(
+    `SELECT COALESCE(SUM(distance_m), 0) AS total_m
+     FROM road_edge
+     WHERE edge_id = ANY($1::bigint[])`,
+    [edgeIds],
+  );
+  const distanceM = parseFloat(distRows[0].total_m);
+
+  const coordinates = await buildGeometry(edgeIds);
+
+  // 경로에 침수 구간 포함 여부
+  const floodedEdgeSet = new Set(floodedEdgeIds);
+  const hasFloodedSegment = edgeIds.some((id) => floodedEdgeSet.has(id));
+
+  return {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates,
+        },
+        properties: {
+          distanceM: Math.round(distanceM),
+          hasFloodedSegment,
+          nodeCount: pathRows.length,
+          edgeCount: edgeIds.length,
+        },
+      },
+    ],
+  };
+}
+
+export default { findEvacuationRoute };
