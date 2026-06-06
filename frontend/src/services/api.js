@@ -30,12 +30,22 @@ const normalizeShelter = (shelter) => ({
 });
 
 const normalizeRoute = (data) => {
-  const waypoints = data.waypoints ?? data.path ?? data.route ?? [];
+  const lineFeature = data.type === 'FeatureCollection'
+    ? data.features?.find((feature) => feature.geometry?.type === 'LineString')
+    : null;
+  const properties = lineFeature?.properties ?? data.properties ?? {};
+  const geojsonWaypoints = lineFeature?.geometry?.coordinates?.map(([lon, lat]) => ({ lat, lon })) ?? null;
+  const waypoints = geojsonWaypoints ?? data.waypoints ?? data.path ?? data.route ?? [];
+  const totalDistance = data.totalDistance ?? data.distance ?? data.distanceMeters ?? properties.distanceM;
+
   return {
     ...data,
-    totalMinutes: data.totalMinutes ?? data.duration ?? data.durationMinutes,
-    totalDistance: data.totalDistance ?? data.distance ?? data.distanceMeters,
-    avoidedGrids: data.avoidedGrids ?? data.avoided_grid_count ?? 0,
+    totalMinutes: data.totalMinutes ?? data.duration ?? data.durationMinutes ?? Math.ceil((totalDistance ?? 0) / 80),
+    totalDistance,
+    avoidedGrids: data.avoidedGrids ?? data.avoided_grid_count ?? (properties.hasFloodedSegment ? 1 : 0),
+    hasFloodedSegment: data.hasFloodedSegment ?? properties.hasFloodedSegment ?? false,
+    nodeCount: data.nodeCount ?? properties.nodeCount,
+    edgeCount: data.edgeCount ?? properties.edgeCount,
     waypoints: waypoints.map((point) => ({
       ...point,
       lat: point.lat,
