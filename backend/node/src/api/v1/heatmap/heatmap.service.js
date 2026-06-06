@@ -65,13 +65,23 @@ function buildGridItem(row, sensor) {
       source:     'sensor',
     };
   }
+  if (row.predicted_at != null) {
+    return {
+      id:          String(row.grid_id),
+      lat:         row.center_lat,
+      lon:         row.center_lon,
+      isFlooded:   row.is_flooded === 1,
+      predictedAt: row.predicted_at ?? null,
+      source:      'prediction',
+    };
+  }
+  // 아무런 값 없는 그리드
   return {
     id:          String(row.grid_id),
     lat:         row.center_lat,
     lon:         row.center_lon,
-    isFlooded:   row.is_flooded === 1,
-    predictedAt: row.predicted_at ?? null,
-    source:      'prediction',
+    isFlooded:   false,
+    source:      'none',
   };
 }
 

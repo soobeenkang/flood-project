@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS weather_observation (
+CREATE TABLE IF NOT EXISTS seoul_weather (
     grid_id INTEGER NOT NULL,    -- 서울 격자 
     tmfc TIMESTAMP NOT NULL,    -- 발표시각(YYYY-MM-DD HH:MM:SS)
 
