@@ -1,39 +1,44 @@
 import { useEffect, useRef, useState } from 'react';
-import { MOCK_HEATMAP, HEATMAP_COLORS, MOCK_SHELTERS, SHELTER_TYPES } from '../data/mockData';
-import { getShelters } from '../services/api';
-
-const USE_MOCK = false;
+import { HEATMAP_COLORS, SHELTER_TYPES } from '../data/mockData';
+import { getHeatmapGrids, getShelters } from '../services/api';
 
 const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const mapRef      = useRef(null);
   const canvasRef   = useRef(null);
   const kakaoMapRef = useRef(null);
   const featuresRef = useRef(null);
+  const floodIdsRef = useRef(new Set());
   const rafRef      = useRef(null);
   const markersRef  = useRef([]);
 
   const [filterType, setFilterType]           = useState('all');
   const [selectedShelter, setSelectedShelter] = useState(null);
-  const [shelters, setShelters]               = useState(MOCK_SHELTERS);
+  const [shelters, setShelters]               = useState([]);
   const [isLoading, setIsLoading]             = useState(false);
 
   // ── 대피소 API fetch ──────────────────────────────────────────────────
   const fetchShelters = async (type = 'all') => {
-    if (USE_MOCK) {
-      setShelters(
-        type === 'all' ? MOCK_SHELTERS : MOCK_SHELTERS.filter(s => s.type === type)
-      );
-      return;
-    }
     setIsLoading(true);
     try {
       const data = await getShelters(userLocation.lat, userLocation.lng, type, 3000);
       setShelters(data.shelters ?? []);
     } catch (e) {
       console.error('[ShelterPage] 대피소 fetch 실패:', e);
-      setShelters(MOCK_SHELTERS); // 실패 시 Mock으로 fallback
+      setShelters([]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchCurrentHeatmap = async () => {
+    try {
+      const data = await getHeatmapGrids(userLocation.lat, userLocation.lng, 'now', 5000);
+      floodIdsRef.current = new Set(
+        (data.grids ?? []).filter(g => g.isFlooded).map(g => g.grid_id)
+      );
+    } catch (e) {
+      console.error('[ShelterPage] 히트맵 fetch 실패:', e);
+      floodIdsRef.current = new Set();
     }
   };
 
@@ -61,7 +66,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
       const lngToX = (lng) => (lng - sw.getLng()) / (ne.getLng() - sw.getLng()) * W;
       const latToY = (lat) => (1 - (lat - sw.getLat()) / (ne.getLat() - sw.getLat())) * H;
 
-      const currentIds = new Set(MOCK_HEATMAP.now);
+      const currentIds = floodIdsRef.current;
       features.forEach((feature) => {
         const { grid_id, lon, lat } = feature.properties;
         if (!currentIds.has(grid_id)) return;
@@ -136,16 +141,15 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         window.kakao.maps.event.addListener(kakaoMap, 'dragend',        drawCanvas);
         window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    drawCanvas);
 
-        fetch('/seoul_grid.geojson')
-          .then(r => r.json())
-          .then(g => {
-            featuresRef.current = g.features;
-            drawCanvas();
-          });
-
-        fetchShelters('all').then(() => {
+        Promise.all([
+          fetch('/seoul_grid.geojson').then(r => r.json()),
+          fetchCurrentHeatmap(),
+          fetchShelters('all'),
+        ]).then(([geojson]) => {
+          featuresRef.current = geojson.features;
+          drawCanvas();
           if (kakaoMapRef.current) addShelterMarkers(kakaoMapRef.current);
-        });
+        }).catch(e => console.error('[ShelterPage init]', e));
       }
     }, 100);
     return () => clearInterval(wait);
