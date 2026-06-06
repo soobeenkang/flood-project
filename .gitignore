@@ -220,6 +220,7 @@ tests/
 
 # OS
 .DS_Store
+<<<<<<< HEAD
 Thumbs.db
 
 # ─── Node.js ───
@@ -248,5 +249,9 @@ mosquitto_data/
 mosquitto_log/
 
 # ─── 로그 ───
-*.log
 logs/
+=======
+Thumbs.dbnode_modules/
+index.html.bak
+postman/
+*.local
