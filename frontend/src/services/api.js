@@ -139,14 +139,7 @@ export const getShelters = (lat, lon, type = 'all', radius = 3000) =>
 // mode: 'avoid_flood' | 'fastest'
 export const getEvacRoute = (originLat, originLon, destLat, destLon, mode = 'avoid_flood') => {
   const params = { startLat: originLat, startLon: originLon, endLat: destLat, endLon: destLon, mode };
-  return request('GET', '/route/evacuation', params)
-    .catch((error) => {
-      if (error.status === 404 || error.status === 405) {
-        return request('GET', '/route/evacuation/evacuation', params);
-      }
-      throw error;
-    })
-    .then(normalizeRoute);
+  return request('GET', '/route/evacuation', params).then(normalizeRoute);
 };
 
 // ── 경보 ──────────────────────────────────────────────────────────────────
