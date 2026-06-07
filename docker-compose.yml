@@ -7,6 +7,7 @@ services:
       POSTGRES_USER: ${DB_USER:-flood}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-floodpw}
       POSTGRES_DB: ${DB_NAME:-flood_db}
+      TZ: "Asia/Seoul"
     ports:
       - "5432:5432"
     volumes:
@@ -71,6 +72,7 @@ services:
       PYTHON_API_URL: http://python-api:8000
       JWT_SECRET: ${JWT_SECRET:-changeme}
       A_SERVICE_KEY: ${A_SERVICE_KEY}
+      TZ: "Asia/Seoul"
     depends_on:
       postgres:
         condition: service_healthy
