@@ -27,10 +27,26 @@ function App() {
   const [selectedShelter, setSelectedShelter] = useState(null);
   const [weather, setWeather]                 = useState(MOCK_WEATHER);
   const [alertBadge, setAlertBadge]           = useState(0);
+  const [userLocation, setUserLocation]       = useState(USER_LOCATION);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 7000, maximumAge: 60000 },
+    );
+  }, []);
 
   // ── 앱 초기화: 위치 기반 침수 여부 + 날씨 fetch ──────────────────────
   useEffect(() => {
-    const { lat, lng } = USER_LOCATION;
+    const { lat, lng } = userLocation;
 
     // 경보 건수
     getAlerts(lat, lng, 50)
@@ -61,7 +77,7 @@ function App() {
       }))
       .catch(() => {}); // 실패 시 Mock 유지
 
-  }, []);
+  }, [userLocation]);
 
   const handleShelterToRoute = (shelter) => {
     setSelectedShelter(shelter);
@@ -71,11 +87,11 @@ function App() {
   const renderPage = () => {
     switch (page) {
       case 'home':       return <HomePage weather={weather} alertBadge={alertBadge} onNavigate={setPage} />;
-      case 'map':        return <MapPage userLocation={USER_LOCATION} onNavigateShelter={() => setPage('shelter')} />;
-      case 'shelter':    return <ShelterPage userLocation={USER_LOCATION} onNavigateRoute={handleShelterToRoute} />;
-      case 'route':      return <RoutePage userLocation={USER_LOCATION} shelter={selectedShelter} />;
+      case 'map':        return <MapPage userLocation={userLocation} onNavigateShelter={() => setPage('shelter')} />;
+      case 'shelter':    return <ShelterPage userLocation={userLocation} onNavigateRoute={handleShelterToRoute} />;
+      case 'route':      return <RoutePage userLocation={userLocation} shelter={selectedShelter} />;
       case 'guidelines': return <GuidelinesPage />;
-      case 'alert':      return <AlertsPage userLocation={USER_LOCATION} />;
+      case 'alert':      return <AlertsPage userLocation={userLocation} />;
       default:           return <HomePage weather={weather} onNavigate={setPage} />;
     }
   };

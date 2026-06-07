@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MOCK_HEATMAP, HEATMAP_COLORS } from '../data/mockData';
 import { getHeatmapGrids, subscribeToGrid } from '../services/api';
+import { createCurrentLocationOverlay, createSearchLocationOverlay } from '../utils/mapOverlays';
 
 const USE_MOCK = false;
 
@@ -28,9 +29,14 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
   const rafRef          = useRef(null);
   const selectedTimeRef = useRef('now');
   const clickListenerRef = useRef(null);
+  const currentMarkerRef = useRef(null);
+  const searchMarkerRef = useRef(null);
+  const mapCenterRef = useRef(userLocation);
 
   const [selectedTime, setSelectedTime]     = useState('now');
   const [isLoading, setIsLoading]           = useState(false);
+  const [searchKeyword, setSearchKeyword]   = useState('');
+  const [searchStatus, setSearchStatus]     = useState(null);
 
   // 이 지역 알림 관련 상태
   const [alertMode, setAlertMode]           = useState(false);  // 그리드 선택 모드
@@ -113,16 +119,39 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     });
   };
 
-  const fetchHeatmap = async (horizon) => {
+  const renderCurrentLocation = (kakaoMap) => {
+    if (currentMarkerRef.current) currentMarkerRef.current.setMap(null);
+    currentMarkerRef.current = createCurrentLocationOverlay(window.kakao, userLocation);
+    currentMarkerRef.current?.setMap(kakaoMap);
+  };
+
+  const fetchHeatmap = async (horizon, center = mapCenterRef.current) => {
     if (USE_MOCK) {
       floodIdsRef.current[horizon] = new Set(MOCK_HEATMAP[horizon] ?? []);
       return;
     }
-    const { lat, lng } = userLocation;
+    const { lat, lng } = center;
     const data = await getHeatmapGrids(lat, lng, horizon, 5000);
     floodIdsRef.current[horizon] = new Set(
       data.grids.filter(g => g.isFlooded).map(g => g.grid_id)
     );
+  };
+
+  const refreshHeatmapAround = async (center) => {
+    setIsLoading(true);
+    try {
+      await Promise.all([
+        fetchHeatmap('now', center),
+        fetchHeatmap('1h', center),
+        fetchHeatmap('3h', center),
+        fetchHeatmap('6h', center),
+      ]);
+      redraw();
+    } catch (e) {
+      console.error('[MapPage heatmap refresh]', e);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // 지도 클릭 → 그리드 선택
@@ -159,6 +188,8 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
           level: 6,
         });
         kakaoMapRef.current = kakaoMap;
+        mapCenterRef.current = userLocation;
+        renderCurrentLocation(kakaoMap);
 
         window.kakao.maps.event.addListener(kakaoMap, 'center_changed', redraw);
         window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   redraw);
@@ -180,6 +211,17 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     }, 100);
     return () => clearInterval(wait);
   }, []);
+
+  useEffect(() => {
+    const kakaoMap = kakaoMapRef.current;
+    if (!kakaoMap || !window.kakao?.maps) return;
+    renderCurrentLocation(kakaoMap);
+    if (!searchMarkerRef.current) {
+      mapCenterRef.current = userLocation;
+      kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
+      refreshHeatmapAround(userLocation);
+    }
+  }, [userLocation]);
 
   // 알림 모드 진입/해제 시 클릭 이벤트 등록/해제
   useEffect(() => {
@@ -212,6 +254,36 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     event.preventDefault();
     event.stopPropagation();
     onNavigateShelter?.();
+  };
+
+  const handleSearch = (event) => {
+    event.preventDefault();
+    const keyword = searchKeyword.trim();
+    const kakaoMap = kakaoMapRef.current;
+    if (!keyword || !kakaoMap || !window.kakao?.maps?.services) return;
+
+    setSearchStatus('searching');
+    const places = new window.kakao.maps.services.Places();
+    places.keywordSearch(keyword, (results, status) => {
+      if (status !== window.kakao.maps.services.Status.OK || !results?.length) {
+        setSearchStatus('empty');
+        return;
+      }
+
+      const place = results[0];
+      const center = { lat: Number(place.y), lng: Number(place.x) };
+      mapCenterRef.current = center;
+
+      kakaoMap.setCenter(new window.kakao.maps.LatLng(center.lat, center.lng));
+      kakaoMap.setLevel(5);
+
+      if (searchMarkerRef.current) searchMarkerRef.current.setMap(null);
+      searchMarkerRef.current = createSearchLocationOverlay(window.kakao, center);
+      searchMarkerRef.current?.setMap(kakaoMap);
+
+      setSearchStatus('done');
+      refreshHeatmapAround(center);
+    });
   };
 
   // 구독 등록
@@ -247,17 +319,49 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
           position: 'absolute', top: 12, left: 12, right: 12,
           background: 'white', borderRadius: 16, padding: '12px 16px',
           boxShadow: '0 2px 12px rgba(0,0,0,0.12)', zIndex: 10,
-          display: 'flex', alignItems: 'center', gap: 12,
+          display: 'flex', flexDirection: 'column', gap: 10,
         }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 12,
-            background: '#EFF6FF', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', fontSize: 20,
-          }}>🌧️</div>
-          <div>
-            <div style={{ fontSize: 11, color: '#9CA3AF', fontWeight: 600 }}>침수 예측 · 서울</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#111' }}>지금 침수된 지역</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: 12,
+              background: '#EFF6FF', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', fontSize: 20,
+            }}>🌧️</div>
+            <div>
+              <div style={{ fontSize: 11, color: '#9CA3AF', fontWeight: 600 }}>침수 예측 · 서울</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#111' }}>지금 침수된 지역</div>
+            </div>
           </div>
+          <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8 }}>
+            <input
+              value={searchKeyword}
+              onChange={(event) => {
+                setSearchKeyword(event.target.value);
+                if (searchStatus) setSearchStatus(null);
+              }}
+              placeholder="장소 검색"
+              style={{
+                flex: 1,
+                height: 38,
+                border: '1px solid #E5E7EB',
+                borderRadius: 10,
+                padding: '0 12px',
+                fontSize: 13,
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+            <button type="submit" style={{
+              width: 48, height: 38, border: 'none', borderRadius: 10,
+              background: '#3B82F6', color: 'white', fontSize: 16,
+              cursor: 'pointer', fontWeight: 700,
+            }}>
+              🔍
+            </button>
+          </form>
+          {searchStatus === 'empty' && (
+            <div style={{ fontSize: 12, color: '#EF4444' }}>검색 결과가 없습니다.</div>
+          )}
         </div>
       )}
 
@@ -287,7 +391,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
       {/* 슬라이더 */}
       {!alertMode && (
         <div style={{
-          position: 'absolute', top: 80, left: 12, right: 12,
+          position: 'absolute', top: 142, left: 12, right: 12,
           background: 'white', borderRadius: 16, padding: '14px 16px',
           boxShadow: '0 2px 12px rgba(0,0,0,0.12)', zIndex: 10,
         }}>
