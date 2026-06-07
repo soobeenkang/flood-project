@@ -78,7 +78,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
 
         features.forEach((feature) => {
           const { grid_id, lon, lat } = feature.properties;
-          if (!ids.has(grid_id)) return;
+          if (!ids.has(String(grid_id))) return;
           if (lon < sw.getLng() || lon > ne.getLng() ||
               lat < sw.getLat() || lat > ne.getLat()) return;
 
@@ -98,7 +98,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
 
       // 선택된 그리드 강조
       if (selectedGridId !== null && features) {
-        const feature = features.find(f => f.properties.grid_id === selectedGridId);
+        const feature = features.find(f => String(f.properties.grid_id) === String(selectedGridId));
         if (feature) {
           const coords = feature.geometry.coordinates[0];
           ctx.beginPath();
@@ -133,7 +133,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     const { lat, lng } = center;
     const data = await getHeatmapGrids(lat, lng, horizon, 5000);
     floodIdsRef.current[horizon] = new Set(
-      data.grids.filter(g => g.isFlooded).map(g => g.grid_id)
+      data.grids.filter(g => g.isFlooded).map(g => String(g.grid_id))
     );
   };
 
@@ -171,7 +171,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
       });
 
       if (found) {
-        setSelectedGridId(found.properties.grid_id);
+        setSelectedGridId(String(found.properties.grid_id));
         setEmailStep(true);
         redraw();
       }

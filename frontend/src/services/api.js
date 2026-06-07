@@ -5,16 +5,23 @@ const BASE = RAW_BASE.replace(/\/$/, '').endsWith('/api/v1')
   ? RAW_BASE.replace(/\/$/, '')
   : `${RAW_BASE.replace(/\/$/, '')}/api/v1`;
 
-const normalizeGrid = (grid) => ({
-  ...grid,
-  id: grid.id ?? grid.grid_id ?? grid.gridId,
-  grid_id: grid.grid_id ?? grid.id ?? grid.gridId,
-  isflooded: grid.isflooded ?? grid.isFlooded ?? grid.flooded ?? grid.flood === 1,
-  isFlooded: grid.isFlooded ?? grid.isflooded ?? grid.flooded ?? grid.flood === 1,
-  lat: grid.lat,
-  lon: grid.lon ?? grid.lng,
-  lng: grid.lng ?? grid.lon,
-});
+const toBool = (value) => value === true || value === 1 || value === '1' || value === 'true';
+
+const normalizeGrid = (grid) => {
+  const gridId = grid.grid_id ?? grid.id ?? grid.gridId;
+  const isFlooded = toBool(grid.isFlooded ?? grid.isflooded ?? grid.is_flooded ?? grid.flooded ?? grid.flood);
+
+  return {
+    ...grid,
+    id: String(gridId),
+    grid_id: String(gridId),
+    isflooded: isFlooded,
+    isFlooded,
+    lat: grid.lat,
+    lon: grid.lon ?? grid.lng,
+    lng: grid.lng ?? grid.lon,
+  };
+};
 
 const normalizeShelterType = (type, shelter = {}) => {
   const raw = [
