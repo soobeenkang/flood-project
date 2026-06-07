@@ -32,7 +32,23 @@ export async function getEvacuationRoute(req, res, next) {
       });
     }
 
-    return res.json(result);
+    // GeoJSON → 프론트엔드 형식 변환
+    const feature = result.features[0];
+    const props   = feature.properties;
+    const coords  = feature.geometry.coordinates; // [[lon, lat], ...]
+
+    const distanceM   = props.distanceM;
+    const totalMinutes = Math.round(distanceM / 80);  // 도보 속도 ~80m/min
+
+    // coordinates → waypoints 변환 (kakao는 {lat, lon} 형식 필요)
+    const waypoints = coords.map(([lon, lat]) => ({ lat, lon }));
+
+    return res.json({
+      totalMinutes,
+      totalDistance:   distanceM,
+      avoidedGrids:    props.hasFloodedSegment ? 1 : 0,  // 또는 별도 카운트 필요시 서비스에서 반환
+      waypoints,
+    });
   } catch (err) {
     next(err);
   }

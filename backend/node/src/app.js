@@ -37,7 +37,7 @@ app.use('/api/v1/heatmap', heatmapRouter);
 app.use('/api/v1/location', locationRouter);
 app.use('/api/v1/alerts', alertsRouter);
 app.use('/api/v1/subscriptions', subscriptionsRouter);
-app.use('/api/v1/route/evacuation', evacuationRouter);
+app.use('/api/v1/route', evacuationRouter);
 
 /*
 // 경로 수정 버전
