@@ -321,7 +321,7 @@ const RoutePage = ({ userLocation, shelter }) => {
 
       {/* 상단 도착지 */}
       <div style={{
-        position: 'absolute', top: 12, left: 12, right: 12,
+        position: 'absolute', top: 'max(56px, calc(env(safe-area-inset-top, 0px) + 12px))', left: 12, right: 12,
         background: 'white', borderRadius: 16, padding: '12px 16px',
         boxShadow: '0 2px 12px rgba(0,0,0,0.12)', zIndex: 10,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -343,7 +343,7 @@ const RoutePage = ({ userLocation, shelter }) => {
 
       {/* 경로 모드 */}
       <div style={{
-        position: 'absolute', top: 76, left: 12, right: 12,
+        position: 'absolute', top: 'max(120px, calc(env(safe-area-inset-top, 0px) + 76px))', left: 12, right: 12,
         display: 'flex', gap: 8, zIndex: 10,
       }}>
         {[

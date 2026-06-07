@@ -4,7 +4,7 @@ const HomePage = ({ weather, alertBadge = 0, onNavigate }) => {
       {/* 날씨 헤더 */}
       <div style={{
         background: 'linear-gradient(160deg, #2563EB 0%, #1D4ED8 100%)',
-        padding: '20px 20px 32px',
+        padding: 'max(72px, calc(env(safe-area-inset-top, 0px) + 28px)) 20px 32px',
         borderRadius: '0 0 28px 28px',
       }}>
         <div style={{

@@ -101,6 +101,8 @@ function App() {
       width: '100%', height: '100dvh',
       display: 'flex', fontFamily: "'Apple SD Gothic Neo', 'Pretendard', sans-serif",
       background: '#F8FAFC', overflow: 'hidden',
+      paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+      boxSizing: 'border-box',
     }}>
       {/* 침수 경보 팝업 */}
       {showAlert && (
@@ -116,7 +118,8 @@ function App() {
       <div style={{
         width: 72, background: 'white', borderRight: '1px solid #F3F4F6',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
-        paddingTop: 20, gap: 4, flexShrink: 0,
+        paddingTop: 'max(52px, calc(env(safe-area-inset-top, 0px) + 8px))',
+        gap: 4, flexShrink: 0,
         boxShadow: '2px 0 8px rgba(0,0,0,0.04)',
       }}>
         {NAV_ITEMS.map((item) => (
