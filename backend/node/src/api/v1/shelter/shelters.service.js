@@ -19,6 +19,7 @@ export const getShelters = async (query) => {
       shelter_id AS id,
       name,
       address,
+      type,
       ST_Y(geom) AS lat,
       ST_X(geom) AS lon,
       ST_DistanceSphere(
@@ -26,12 +27,11 @@ export const getShelters = async (query) => {
         ST_SetSRID(ST_MakePoint($2, $1), 4326)
       ) AS distance
     FROM shelter
-    WHERE is_active = TRUE
-      AND ST_DWithin(
-        geom::geography,
-        ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
-        $3
-      )
+    WHERE ST_DWithin(
+      geom::geography,
+      ST_SetSRID(ST_MakePoint($2, $1), 4326)::geography,
+      $3
+    )
     ORDER BY distance ASC
     `,
     [lat, lon, radius]
@@ -41,6 +41,7 @@ export const getShelters = async (query) => {
     id: shelter.id,
     name: shelter.name,
     address: shelter.address,
+    type: shelter.type,
     lat: Number(shelter.lat),
     lon: Number(shelter.lon),
     distance: Math.round(Number(shelter.distance)),
@@ -57,12 +58,11 @@ export const getShelterDetail = async (shelterId) => {
       shelter_id AS id,
       name,
       address,
+      type,
       ST_Y(geom) AS lat,
-      ST_X(geom) AS lon,
-      is_active
+      ST_X(geom) AS lon
     FROM shelter
     WHERE shelter_id = $1
-      AND is_active = TRUE
     `,
     [shelterId]
   );
@@ -75,8 +75,8 @@ export const getShelterDetail = async (shelterId) => {
     id: rows[0].id,
     name: rows[0].name,
     address: rows[0].address,
+    type: rows[0].type,
     lat: Number(rows[0].lat),
     lon: Number(rows[0].lon),
-    isActive: rows[0].is_active,
   };
 };
