@@ -46,7 +46,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     try {
       const data = await getHeatmapGrids(userLocation.lat, userLocation.lng, 'now', 5000);
       floodIdsRef.current = new Set(
-        (data.grids ?? []).filter(g => g.isFlooded).map(g => g.grid_id)
+        (data.grids ?? []).filter(g => g.isFlooded).map(g => String(g.grid_id))
       );
     } catch (e) {
       console.error('[ShelterPage] 히트맵 fetch 실패:', e);
@@ -81,7 +81,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
       const currentIds = floodIdsRef.current;
       features.forEach((feature) => {
         const { grid_id, lon, lat } = feature.properties;
-        if (!currentIds.has(grid_id)) return;
+        if (!currentIds.has(String(grid_id))) return;
         if (lon < sw.getLng() || lon > ne.getLng() ||
             lat < sw.getLat() || lat > ne.getLat()) return;
 
