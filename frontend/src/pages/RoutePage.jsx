@@ -297,6 +297,15 @@ const RoutePage = ({ userLocation, shelter }) => {
     fetchRoute(mode, selectedShelter);
   };
 
+  const handleRecenterToMe = () => {
+    const kakaoMap = kakaoMapRef.current;
+    if (!kakaoMap || !window.kakao?.maps) return;
+
+    kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
+    kakaoMap.setLevel(6);
+    renderCurrentLocation(kakaoMap);
+  };
+
   const dest = selectedShelter;
 
   return (
@@ -358,6 +367,31 @@ const RoutePage = ({ userLocation, shelter }) => {
           </button>
         ))}
       </div>
+
+      <button
+        type="button"
+        onClick={handleRecenterToMe}
+        aria-label="내 위치로 이동"
+        title="내 위치로 이동"
+        style={{
+          position: 'absolute',
+          right: 16,
+          bottom: 304,
+          width: 46,
+          height: 46,
+          border: 'none',
+          borderRadius: '50%',
+          background: 'white',
+          color: '#2563EB',
+          boxShadow: '0 3px 12px rgba(0,0,0,0.18)',
+          zIndex: 12,
+          cursor: 'pointer',
+          fontSize: 20,
+          fontWeight: 700,
+        }}
+      >
+        📍
+      </button>
 
       {/* 하단 정보 */}
       <div style={{
