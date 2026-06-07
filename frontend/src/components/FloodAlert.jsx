@@ -8,7 +8,7 @@ const FloodAlert = ({ weather, onClose, onFindShelter, onFindRoute }) => {
       {/* 빨간 경보 헤더 */}
       <div style={{
         background: 'linear-gradient(160deg, #DC2626 0%, #B91C1C 100%)',
-        padding: '48px 24px 36px',
+        padding: 'calc(env(safe-area-inset-top, 0px) + 76px) 24px 36px',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         gap: 12,
       }}>

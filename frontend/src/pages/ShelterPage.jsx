@@ -224,7 +224,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
 
       {/* 필터 탭 */}
       <div style={{
-        position: 'absolute', top: 12, left: 12, right: 12,
+        position: 'absolute', top: 'max(56px, calc(env(safe-area-inset-top, 0px) + 12px))', left: 12, right: 12,
         display: 'flex', gap: 8, zIndex: 10,
       }}>
         {Object.entries(SHELTER_TYPES).map(([key, val]) => (

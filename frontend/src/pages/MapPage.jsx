@@ -334,7 +334,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
       {/* 상단 헤더 */}
       {!alertMode && (
         <div style={{
-          position: 'absolute', top: 12, left: 12, right: 12,
+          position: 'absolute', top: 'max(56px, calc(env(safe-area-inset-top, 0px) + 12px))', left: 12, right: 12,
           background: 'white', borderRadius: 16, padding: '12px 16px',
           boxShadow: '0 2px 12px rgba(0,0,0,0.12)', zIndex: 10,
           display: 'flex', flexDirection: 'column', gap: 10,
@@ -386,7 +386,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
       {/* 알림 모드 안내 배너 */}
       {alertMode && !emailStep && (
         <div style={{
-          position: 'absolute', top: 12, left: 12, right: 12,
+          position: 'absolute', top: 'max(56px, calc(env(safe-area-inset-top, 0px) + 12px))', left: 12, right: 12,
           background: '#3B82F6', borderRadius: 16, padding: '14px 16px',
           boxShadow: '0 2px 12px rgba(59,130,246,0.3)', zIndex: 10,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -409,7 +409,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
       {/* 슬라이더 */}
       {!alertMode && (
         <div style={{
-          position: 'absolute', top: 142, left: 12, right: 12,
+          position: 'absolute', top: 'max(186px, calc(env(safe-area-inset-top, 0px) + 142px))', left: 12, right: 12,
           background: 'white', borderRadius: 16, padding: '14px 16px',
           boxShadow: '0 2px 12px rgba(0,0,0,0.12)', zIndex: 10,
         }}>
