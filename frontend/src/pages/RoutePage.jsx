@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HEATMAP_COLORS, SHELTER_TYPES } from '../data/mockData';
 import { getEvacRoute, getHeatmapGrids, getShelters } from '../services/api';
+import { createCurrentLocationOverlay } from '../utils/mapOverlays';
 
 const RoutePage = ({ userLocation, shelter }) => {
   const mapRef        = useRef(null);
@@ -96,6 +97,7 @@ const RoutePage = ({ userLocation, shelter }) => {
     if (polylineRef.current)    polylineRef.current.setMap(null);
     if (myMarkerRef.current)    myMarkerRef.current.setMap(null);
     if (destMarkerRef.current)  destMarkerRef.current.setMap(null);
+    renderCurrentLocation(kakaoMap);
 
     if (!selectedShelter) return;
     const dest = selectedShelter;
@@ -124,20 +126,6 @@ const RoutePage = ({ userLocation, shelter }) => {
     });
     polyline.setMap(kakaoMap);
     polylineRef.current = polyline;
-
-    // 내 위치 마커
-    const myEl = document.createElement('div');
-    myEl.style.cssText = `
-      width:20px;height:20px;background:white;
-      border:3px solid #EF4444;border-radius:50%;
-      display:flex;align-items:center;justify-content:center;
-    `;
-    myEl.appendChild(Object.assign(document.createElement('div'), {
-      style: 'width:8px;height:8px;background:#EF4444;border-radius:50%;',
-    }));
-    const myMarker = new window.kakao.maps.CustomOverlay({ position: origin, content: myEl, zIndex: 5 });
-    myMarker.setMap(kakaoMap);
-    myMarkerRef.current = myMarker;
 
     // 목적지 마커
     const destEl = document.createElement('div');
@@ -186,6 +174,12 @@ const RoutePage = ({ userLocation, shelter }) => {
       marker.setMap(kakaoMap);
       shelterMarkersRef.current.push(marker);
     });
+  };
+
+  const renderCurrentLocation = (kakaoMap) => {
+    if (myMarkerRef.current) myMarkerRef.current.setMap(null);
+    myMarkerRef.current = createCurrentLocationOverlay(window.kakao, userLocation);
+    myMarkerRef.current?.setMap(kakaoMap);
   };
 
   const fetchRoute = async (mode, destination = selectedShelter) => {
@@ -249,6 +243,7 @@ const RoutePage = ({ userLocation, shelter }) => {
           level: 6,
         });
         kakaoMapRef.current = kakaoMap;
+        renderCurrentLocation(kakaoMap);
 
         window.kakao.maps.event.addListener(kakaoMap, 'center_changed', redraw);
         window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   redraw);
@@ -270,6 +265,17 @@ const RoutePage = ({ userLocation, shelter }) => {
   }, []);
 
   useEffect(() => {
+    const kakaoMap = kakaoMapRef.current;
+    if (!kakaoMap || !window.kakao?.maps) return;
+
+    renderCurrentLocation(kakaoMap);
+    fetchCurrentHeatmap().then(redraw);
+    fetchShelters();
+    if (selectedShelter) fetchRoute(routeMode, selectedShelter);
+    else kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
+  }, [userLocation]);
+
+  useEffect(() => {
     if (shelter) setSelectedShelter(shelter);
   }, [shelter]);
 
@@ -289,6 +295,15 @@ const RoutePage = ({ userLocation, shelter }) => {
   const handleModeChange = (mode) => {
     setRouteMode(mode);
     fetchRoute(mode, selectedShelter);
+  };
+
+  const handleRecenterToMe = () => {
+    const kakaoMap = kakaoMapRef.current;
+    if (!kakaoMap || !window.kakao?.maps) return;
+
+    kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
+    kakaoMap.setLevel(6);
+    renderCurrentLocation(kakaoMap);
   };
 
   const dest = selectedShelter;
@@ -352,6 +367,31 @@ const RoutePage = ({ userLocation, shelter }) => {
           </button>
         ))}
       </div>
+
+      <button
+        type="button"
+        onClick={handleRecenterToMe}
+        aria-label="내 위치로 이동"
+        title="내 위치로 이동"
+        style={{
+          position: 'absolute',
+          right: 16,
+          bottom: 304,
+          width: 46,
+          height: 46,
+          border: 'none',
+          borderRadius: '50%',
+          background: 'white',
+          color: '#2563EB',
+          boxShadow: '0 3px 12px rgba(0,0,0,0.18)',
+          zIndex: 12,
+          cursor: 'pointer',
+          fontSize: 20,
+          fontWeight: 700,
+        }}
+      >
+        📍
+      </button>
 
       {/* 하단 정보 */}
       <div style={{

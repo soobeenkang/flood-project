@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { HEATMAP_COLORS, SHELTER_TYPES } from '../data/mockData';
 import { getHeatmapGrids, getShelters } from '../services/api';
+import { createCurrentLocationOverlay } from '../utils/mapOverlays';
 
 const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const mapRef      = useRef(null);
@@ -10,6 +11,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const floodIdsRef = useRef(new Set());
   const rafRef      = useRef(null);
   const markersRef  = useRef([]);
+  const currentMarkerRef = useRef(null);
   const requestSeqRef = useRef(0);
 
   const [filterType, setFilterType]           = useState('all');
@@ -135,6 +137,12 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     });
   };
 
+  const renderCurrentLocation = (kakaoMap) => {
+    if (currentMarkerRef.current) currentMarkerRef.current.setMap(null);
+    currentMarkerRef.current = createCurrentLocationOverlay(window.kakao, userLocation);
+    currentMarkerRef.current?.setMap(kakaoMap);
+  };
+
   // ── 카카오맵 초기화 ───────────────────────────────────────────────────
   useEffect(() => {
     const wait = setInterval(() => {
@@ -146,6 +154,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
           level: 6,
         });
         kakaoMapRef.current = kakaoMap;
+        renderCurrentLocation(kakaoMap);
 
         window.kakao.maps.event.addListener(kakaoMap, 'center_changed', drawCanvas);
         window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   drawCanvas);
@@ -165,6 +174,16 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     return () => clearInterval(wait);
   }, []);
 
+  useEffect(() => {
+    const kakaoMap = kakaoMapRef.current;
+    if (!kakaoMap || !window.kakao?.maps) return;
+
+    kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
+    renderCurrentLocation(kakaoMap);
+    fetchCurrentHeatmap().then(drawCanvas);
+    fetchShelters(filterType);
+  }, [userLocation]);
+
   // ── 필터 변경 시 ──────────────────────────────────────────────────────
   useEffect(() => {
     fetchShelters(filterType);
@@ -180,6 +199,17 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     const stillVisible = shelters.some((item) => item.id === selectedShelter.id);
     if (!stillVisible) setSelectedShelter(null);
   }, [shelters, selectedShelter]);
+
+  const handleRecenterToMe = () => {
+    const kakaoMap = kakaoMapRef.current;
+    if (!kakaoMap || !window.kakao?.maps) return;
+
+    kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
+    kakaoMap.setLevel(6);
+    renderCurrentLocation(kakaoMap);
+    fetchCurrentHeatmap().then(drawCanvas);
+    fetchShelters(filterType);
+  };
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
@@ -220,6 +250,31 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
           padding: '8px 16px', borderRadius: 20, fontSize: 13, zIndex: 10,
         }}>불러오는 중…</div>
       )}
+
+      <button
+        type="button"
+        onClick={handleRecenterToMe}
+        aria-label="내 위치로 이동"
+        title="내 위치로 이동"
+        style={{
+          position: 'absolute',
+          right: 16,
+          bottom: selectedShelter ? 214 : 24,
+          width: 46,
+          height: 46,
+          border: 'none',
+          borderRadius: '50%',
+          background: 'white',
+          color: '#2563EB',
+          boxShadow: '0 3px 12px rgba(0,0,0,0.18)',
+          zIndex: 12,
+          cursor: 'pointer',
+          fontSize: 20,
+          fontWeight: 700,
+        }}
+      >
+        📍
+      </button>
 
       {/* 선택된 대피소 패널 */}
       {selectedShelter && (
