@@ -93,7 +93,7 @@ const RoutePage = ({ userLocation, shelter }) => {
     });
   };
 
-  const drawRoute = (kakaoMap, waypoints) => {
+  const drawRoute = (kakaoMap, waypoints, mode = routeMode, hasFloodedSegment = false) => {
     if (polylineRef.current)    polylineRef.current.setMap(null);
     if (myMarkerRef.current)    myMarkerRef.current.setMap(null);
     if (destMarkerRef.current)  destMarkerRef.current.setMap(null);
@@ -120,7 +120,7 @@ const RoutePage = ({ userLocation, shelter }) => {
     const polyline = new window.kakao.maps.Polyline({
       path,
       strokeWeight: 5,
-      strokeColor: '#3B82F6',
+      strokeColor: mode === 'fastest' && hasFloodedSegment ? '#EF4444' : '#3B82F6',
       strokeOpacity: 1,
       strokeStyle: 'solid',
     });
@@ -206,21 +206,30 @@ const RoutePage = ({ userLocation, shelter }) => {
         destLat, destLon,
         mode
       );
+      const avoidedGrids = data.avoidedGrids ?? 0;
+      const hasFloodedSegment = data.hasFloodedSegment === true;
+      const waypoints = data.waypoints ?? [];
       setRouteInfo({
+        routeType: data.routeType,
         totalMinutes:  data.totalMinutes ?? 0,
         totalDistance: data.totalDistance ?? 0,
-        avoidedGrids:  data.avoidedGrids,
+        avoidedGrids,
+        hasFloodedSegment,
         desc: mode === 'avoid_flood'
-          ? `침수구역 ${data.avoidedGrids}곳을 우회해요`
-          : '최단 경로로 안내해요',
+          ? `침수구역 ${avoidedGrids}곳을 우회해요`
+          : hasFloodedSegment
+            ? '최단 경로에 침수 구간이 있어요'
+            : '침수 구간 없는 최단 경로예요',
         detail: mode === 'avoid_flood'
           ? '침수 위험 구역을 피해 안전한 경로로 안내합니다.'
-          : '침수구역을 통과할 수 있습니다. 주의하세요.',
-        waypoints: data.waypoints ?? [],
+          : hasFloodedSegment
+            ? '가장 짧은 경로라 빠르지만 침수 구간을 지날 수 있습니다. 주의하세요.'
+            : '현재 감지된 침수 구간을 지나지 않는 최단 경로입니다.',
+        waypoints,
       });
       if (kakaoMapRef.current) {
         try {
-          drawRoute(kakaoMapRef.current, data.waypoints ?? []);
+          drawRoute(kakaoMapRef.current, waypoints, mode, hasFloodedSegment);
         } catch (drawError) {
           console.error('[RoutePage drawRoute]', drawError);
         }
@@ -271,12 +280,17 @@ const RoutePage = ({ userLocation, shelter }) => {
     renderCurrentLocation(kakaoMap);
     fetchCurrentHeatmap().then(redraw);
     fetchShelters();
-    if (selectedShelter) fetchRoute(routeMode, selectedShelter);
-    else kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
+    const timer = setTimeout(() => {
+      if (selectedShelter) fetchRoute(routeMode, selectedShelter);
+      else kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
+    }, 0);
+    return () => clearTimeout(timer);
   }, [userLocation]);
 
   useEffect(() => {
-    if (shelter) setSelectedShelter(shelter);
+    if (!shelter) return;
+    const timer = setTimeout(() => setSelectedShelter(shelter), 0);
+    return () => clearTimeout(timer);
   }, [shelter]);
 
   useEffect(() => {
@@ -284,12 +298,15 @@ const RoutePage = ({ userLocation, shelter }) => {
   }, [shelters, selectedShelter]);
 
   useEffect(() => {
-    if (selectedShelter) {
-      fetchRoute(routeMode, selectedShelter);
-    } else {
-      setRouteInfo(null);
-      setRouteError(null);
-    }
+    const timer = setTimeout(() => {
+      if (selectedShelter) {
+        fetchRoute(routeMode, selectedShelter);
+      } else {
+        setRouteInfo(null);
+        setRouteError(null);
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [selectedShelter]);
 
   const handleModeChange = (mode) => {
@@ -467,7 +484,7 @@ const RoutePage = ({ userLocation, shelter }) => {
               <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: '#111', marginBottom: 4 }}>
-                    ✅ {routeInfo.desc}
+                    {routeInfo.hasFloodedSegment ? '⚠️' : '✅'} {routeInfo.desc}
                   </div>
                   <div style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.5 }}>
                     {routeInfo.detail}
