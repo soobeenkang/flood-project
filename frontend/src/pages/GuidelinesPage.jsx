@@ -14,7 +14,13 @@ const GuidelinesPage = () => {
   const items = GUIDELINES[activeTab] ?? [];
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', background: '#F8FAFC', padding: '16px' }}>
+    <div style={{
+      height: '100%',
+      overflowY: 'auto',
+      background: '#F8FAFC',
+      padding: 'max(72px, calc(env(safe-area-inset-top, 0px) + 28px)) 16px 16px',
+      boxSizing: 'border-box',
+    }}>
       {/* 헤더 */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 12, color: '#9CA3AF', marginBottom: 4 }}>

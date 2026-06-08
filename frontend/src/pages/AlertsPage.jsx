@@ -20,16 +20,20 @@ const AlertsPage = ({ userLocation }) => {
 
   useEffect(() => {
     if (USE_MOCK) return;
-    setIsLoading(true);
-    getAlerts(userLocation?.lat, userLocation?.lng)
-      .then(data => setAlerts(data.alerts ?? []))
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
-  }, []);
+    const timer = setTimeout(() => {
+      setIsLoading(true);
+      getAlerts(userLocation?.lat, userLocation?.lng)
+        .then(data => setAlerts(data.alerts ?? []))
+        .catch(() => {})
+        .finally(() => setIsLoading(false));
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [userLocation?.lat, userLocation?.lng]);
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: '#F8FAFC' }}>
-      <div style={{ padding: '20px 16px 0' }}>
+      <div style={{ padding: 'max(72px, calc(env(safe-area-inset-top, 0px) + 28px)) 16px 0' }}>
         <div style={{ fontSize: 22, fontWeight: 800, color: '#111', marginBottom: 4 }}>경보</div>
         <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 16 }}>
           24시간 이내 발령된 경보
