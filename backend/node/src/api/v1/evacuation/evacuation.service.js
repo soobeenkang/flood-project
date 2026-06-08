@@ -13,7 +13,10 @@ async function getFloodedEdgeIds() {
 
   // 1) Redis 캐시 스캔 (아두이노 센서 최우선)
   try {
-    for await (const key of redis.scanIterator({ MATCH: 'sensor:grid:*', COUNT: 200 })) {
+    for await (const key of redis.scanIterator({
+      match: 'sensor:grid:*',
+      count: 200
+    })) {
       const raw = await redis.get(key);
       if (!raw) continue;
       const data = JSON.parse(raw);
@@ -100,6 +103,7 @@ async function runAStar(startNode, endNode, floodedEdgeIds) {
   `;
 
   // pgr_aStar 첫 번째 인자: 엣지 쿼리 문자열 (동적 생성)
+  const safeEdgeIds = floodedEdgeIds.map((id) => Number(id)).join(',');
   const edgeQuery = hasFlooded
     ? `
       SELECT
@@ -107,12 +111,12 @@ async function runAStar(startNode, endNode, floodedEdgeIds) {
         from_node        AS source,
         to_node          AS target,
         distance_m + CASE
-          WHEN edge_id = ANY(ARRAY[${floodedEdgeIds.map((id) => `${id}`).join(',')}]::bigint[])
+          WHEN edge_id = ANY(ARRAY[${safeEdgeIds}]::bigint[])
           THEN ${FLOOD_PENALTY}
           ELSE 0
         END              AS cost,
         distance_m + CASE
-          WHEN edge_id = ANY(ARRAY[${floodedEdgeIds.map((id) => `${id}`).join(',')}]::bigint[])
+          WHEN edge_id = ANY(ARRAY[${safeEdgeIds}]::bigint[])
           THEN ${FLOOD_PENALTY}
           ELSE 0
         END              AS reverse_cost,
@@ -142,12 +146,16 @@ async function runAStar(startNode, endNode, floodedEdgeIds) {
 
 // ── 경로 엣지 geom → GeoJSON coordinates ─────────────────────
 
-async function buildGeometry(edgeIds) {
-  if (edgeIds.length === 0) return [];
+async function buildGeometry(validPathRows) {
+  if (validPathRows.length === 0) return [];
+
+  const edgeIds = validPathRows.map((r) => String(r.edge));
 
   const { rows } = await pool.query(
     `SELECT
        edge_id,
+       from_node,
+       to_node,
        ST_AsGeoJSON(geom)::json AS geom
      FROM road_edge
      WHERE edge_id = ANY($1::bigint[])`,
@@ -156,16 +164,29 @@ async function buildGeometry(edgeIds) {
 
   // edge_id → coordinates 맵
   const geomMap = new Map(
-    rows.map((r) => [String(r.edge_id), r.geom.coordinates]),
+    rows.map((r) => [String(r.edge_id), r]),
   );
 
   // 경로 순서대로 좌표 이어붙이기 (중복 첫점 제거)
   const coords = [];
-  for (const edgeId of edgeIds) {
-    const seg = geomMap.get(String(edgeId));
-    if (!seg) continue;
-    if (coords.length === 0) coords.push(...seg);
-    else coords.push(...seg.slice(1));
+  for (let i = 0; i < validPathRows.length; i++) {
+    const currentRow = validPathRows[i];
+    const edgeData = geomMap.get(String(currentRow.edge));
+    if (!edgeData) continue;
+
+    // 원본 좌표가 훼손되지 않도록 깊은 복사
+    let segCoords = [...edgeData.geom.coordinates];
+
+    if (currentRow.node === edgeData.to_node) {
+      segCoords.reverse();
+    }
+
+    // 경로 레이어 구축 (접점 중복 제거하며 엮기)
+    if (coords.length === 0) {
+      coords.push(...segCoords);
+    } else {
+      coords.push(...segCoords.slice(1));
+    }
   }
   return coords;
 }
@@ -183,14 +204,32 @@ export async function findEvacuationRoute(startLat, startLon, endLat, endLon) {
   if (!startNode || !endNode) return null;
   if (startNode === endNode) return null;
 
+  const normalPathRows = await runAStar(startNode, endNode, []);
+
   const pathRows = await runAStar(startNode, endNode, floodedEdgeIds);
   if (pathRows.length === 0) return null;
 
-  // -1 은 목적지 도착 행 (edge 없음) — 제외
-  const edgeIds = pathRows
-    .filter((r) => r.edge !== -1)
-    .map((r) => String(r.edge));
+  // 디버깅 로그
+  /*
+  console.log('====== [디버깅] 침수 라우팅 검증 ======');
+  console.log('1. 수집된 침수 엣지 개수:', floodedEdgeIds.length);
+  console.log('2. 수집된 침수 엣지 샘플:', floodedEdgeIds.slice(0, 5));
+  */
 
+  // --- [안전경로] -1 은 목적지 도착 행 (edge 없음) — 제외
+  const validPathRows = [];
+  pathRows.forEach((r) => {
+    if (r.edge === -1) return;
+    const currentEdge = String(r.edge);
+    
+    // 직전 엣지와 똑같은 엣지가 연속으로 들어오면 스킵
+    if (validPathRows.length > 0 && validPathRows[validPathRows.length - 1].edge === r.edge) {
+      return;
+    }
+    validPathRows.push(r);
+  });
+
+  const edgeIds = validPathRows.map((r) => String(r.edge));
   const totalCostM = pathRows[pathRows.length - 1]?.agg_cost ?? 0;
 
   // 실제 도로 거리 (페널티 제외)
@@ -202,10 +241,44 @@ export async function findEvacuationRoute(startLat, startLon, endLat, endLon) {
   );
   const distanceM = parseFloat(distRows[0].total_m);
 
-  const coordinates = await buildGeometry(edgeIds);
+  const coordinates = await buildGeometry(validPathRows);
+
+  // -- [일반경로] 유효 엣지 정제 및 좌표 추출
+  const validNormalPathRows = [];
+  if (normalPathRows && normalPathRows.length > 0) {
+    normalPathRows.forEach((r) => {
+      if (r.edge === -1 || r.edge === '-1' || r.edge == null) return;
+      if (validNormalPathRows.length > 0 && String(validNormalPathRows[validNormalPathRows.length - 1].edge) === String(r.edge))
+        return;
+      validNormalPathRows.push(r);
+    });
+  }
+
+  let normalCoordinates = [];
+  let normalDistanceM = 0;
+  let normalEdgeIds = [];
+
+  if (validNormalPathRows.length > 0) {
+    normalEdgeIds = validNormalPathRows.map((r) => String(r.edge));
+    const { rows: normalDistRows } = await pool.query(
+      `SELECT COALESCE(SUM(distance_m), 0) AS total_m FROM road_edge WHERE edge_id = ANY($1::bigint[])`,
+      [normalEdgeIds],
+    );
+    normalDistanceM = parseFloat(normalDistRows[0].total_m);
+    normalCoordinates = await buildGeometry(validNormalPathRows);
+  }
 
   // 경로에 침수 구간 포함 여부
   const floodedEdgeSet = new Set(floodedEdgeIds);
+  let bypassedCount = 0;
+
+  if (normalEdgeIds.length > 0) {
+    const uniqueNormalEdges = new Set(normalEdgeIds);
+    uniqueNormalEdges.forEach(id => {
+      if (floodedEdgeSet.has(id)) bypassedCount++;
+    });
+  }
+
   const hasFloodedSegment = edgeIds.some((id) => floodedEdgeSet.has(id));
 
   return {
@@ -213,13 +286,31 @@ export async function findEvacuationRoute(startLat, startLon, endLat, endLon) {
     features: [
       {
         type: 'Feature',
+        id: 'safe_route',
         geometry: {
           type: 'LineString',
           coordinates,
         },
         properties: {
+          routeType: 'safe',
           distanceM: Math.round(distanceM),
           hasFloodedSegment,
+          bypassedCount,
+          nodeCount: pathRows.length,
+          edgeCount: edgeIds.length,
+        },
+      },
+      {
+        type: 'Feature',
+        id: 'normal_route',
+        geometry: {
+          type: 'LineString',
+          coordinates: normalCoordinates,
+        },
+        properties: {
+          routeType: 'normal',
+          distanceM: Math.round(normalDistanceM),
+          hasFloodedSegment: bypassedCount > 0,
           nodeCount: pathRows.length,
           edgeCount: edgeIds.length,
         },

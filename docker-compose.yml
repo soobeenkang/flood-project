@@ -99,6 +99,8 @@ services:
       DB_USER: ${DB_USER:-flood}
       DB_PASSWORD: ${DB_PASSWORD:-floodpw}
       DB_NAME: ${DB_NAME:-flood_db}
+      WEATHER_AUTH_KEY: ${WEATHER_AUTH_KEY}
+      TZ: "Asia/Seoul"
     depends_on:
       postgres:
         condition: service_healthy
