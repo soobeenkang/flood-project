@@ -1,7 +1,8 @@
 import { http, HttpResponse } from 'msw';
 import { heatmapFixture, sensorsFixture } from './fixtures/heatmapFixture';
 
-const BASE = 'http://localhost:3000/api/v1';
+const RAW_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+const BASE = `${RAW_BASE}/api/v1`;
 
 export const handlers = [
   // ── 히트맵 ───────────────────────────────────────────────────────────────
