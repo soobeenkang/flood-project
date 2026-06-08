@@ -61,35 +61,72 @@ const normalizeShelter = (shelter) => ({
   status: shelter.status ?? shelter.operationStatus ?? shelter.운영상태 ?? '운영중',
 });
 
-const normalizeRoute = (data) => {
-  const lineFeature = data.type === 'FeatureCollection'
-    ? data.features?.find((feature) => feature.geometry?.type === 'LineString')
-    : null;
-  const properties = lineFeature?.properties ?? data.properties ?? {};
-  const geojsonWaypoints = lineFeature?.geometry?.coordinates?.map(([lon, lat]) => ({ lat, lon })) ?? null;
-  const waypoints = geojsonWaypoints ?? data.waypoints ?? data.path ?? data.route ?? [];
+const normalizeRouteFeature = (feature) => {
+  const properties = feature?.properties ?? {};
+  const coordinates = feature?.geometry?.coordinates ?? [];
+  const totalDistance = properties.distanceM;
+
+  return {
+    id: feature?.id,
+    routeType: properties.routeType ?? feature?.id,
+    totalMinutes: Math.ceil((totalDistance ?? 0) / 80),
+    totalDistance,
+    avoidedGrids: properties.bypassedCount ?? properties.avoidedGrids ?? properties.avoided_grid_count ?? 0,
+    hasFloodedSegment: properties.hasFloodedSegment ?? false,
+    nodeCount: properties.nodeCount,
+    edgeCount: properties.edgeCount,
+    waypoints: coordinates.map(([lon, lat]) => ({ lat, lon, lng: lon })),
+  };
+};
+
+const normalizeWaypoint = (point) => {
+  if (Array.isArray(point)) {
+    const [lon, lat] = point;
+    return { lat, lon, lng: lon };
+  }
+  return {
+    ...point,
+    lat: point.lat ?? point.latitude,
+    lon: point.lon ?? point.lng ?? point.longitude,
+    lng: point.lng ?? point.lon ?? point.longitude,
+  };
+};
+
+const normalizeRoute = (data, mode = 'avoid_flood') => {
+  if (data.type === 'FeatureCollection') {
+    const routeFeatures = asArray(data.features)
+      .filter((feature) => feature.geometry?.type === 'LineString')
+      .map(normalizeRouteFeature);
+    const safeRoute = routeFeatures.find((route) => route.id === 'safe_route' || route.routeType === 'safe');
+    const normalRoute = routeFeatures.find((route) => route.id === 'normal_route' || route.routeType === 'normal');
+    const selectedRoute = mode === 'fastest'
+      ? (normalRoute ?? safeRoute ?? routeFeatures[0])
+      : (safeRoute ?? normalRoute ?? routeFeatures[0]);
+
+    return {
+      ...data,
+      routes: {
+        safe: safeRoute,
+        normal: normalRoute,
+      },
+      selectedRoute,
+      ...(selectedRoute ?? {}),
+    };
+  }
+
+  const properties = data.properties ?? {};
+  const waypoints = data.waypoints ?? data.path ?? data.route ?? [];
   const totalDistance = data.totalDistance ?? data.distance ?? data.distanceMeters ?? properties.distanceM;
 
   return {
     ...data,
     totalMinutes: data.totalMinutes ?? data.duration ?? data.durationMinutes ?? Math.ceil((totalDistance ?? 0) / 80),
     totalDistance,
-    avoidedGrids: data.avoidedGrids ?? data.avoided_grid_count ?? (properties.hasFloodedSegment ? 1 : 0),
+    avoidedGrids: data.bypassedCount ?? data.avoidedGrids ?? data.avoided_grid_count ?? properties.bypassedCount ?? 0,
     hasFloodedSegment: data.hasFloodedSegment ?? properties.hasFloodedSegment ?? false,
     nodeCount: data.nodeCount ?? properties.nodeCount,
     edgeCount: data.edgeCount ?? properties.edgeCount,
-    waypoints: waypoints.map((point) => {
-      if (Array.isArray(point)) {
-        const [lon, lat] = point;
-        return { lat, lon, lng: lon };
-      }
-      return {
-        ...point,
-        lat: point.lat ?? point.latitude,
-        lon: point.lon ?? point.lng ?? point.longitude,
-        lng: point.lng ?? point.lon ?? point.longitude,
-      };
-    }),
+    waypoints: waypoints.map(normalizeWaypoint),
   };
 };
 
@@ -146,7 +183,7 @@ export const getShelters = (lat, lon, type = 'all', radius = 3000) =>
 // mode: 'avoid_flood' | 'fastest'
 export const getEvacRoute = (originLat, originLon, destLat, destLon, mode = 'avoid_flood') => {
   const params = { startLat: originLat, startLon: originLon, endLat: destLat, endLon: destLon, mode };
-  return request('GET', '/route/evacuation', params).then(normalizeRoute);
+  return request('GET', '/route/evacuation', params).then((data) => normalizeRoute(data, mode));
 };
 
 // ── 경보 ──────────────────────────────────────────────────────────────────
