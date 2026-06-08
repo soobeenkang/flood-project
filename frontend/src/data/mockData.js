@@ -18,7 +18,8 @@ export const HEATMAP_COLORS = {
 
 // ── 날씨 Mock ─────────────────────────────────────────────────────────────
 export const MOCK_WEATHER = {
-  district:    '서대문구 연희동',
+  district:    '마포구 도화동',
+  location:    '마포구 도화동',
   rainfall:    32,
   rainProb:    95,
   temperature: 22,
@@ -33,11 +34,11 @@ export const MOCK_WEATHER = {
 // ── 대피소 Mock ───────────────────────────────────────────────────────────
 export const MOCK_SHELTERS = [
   {
-    id: 'S-001', name: '정신여자고등학교', type: 'school',
-    address: '서울 강남구 도산대로 123',
-    lat: 37.5900, lng: 127.0200,
-    distance: 320, walkMinutes: 4, status: '운영중',
-  },
+  id: 'S-001', name: '정신여자고등학교', type: 'school',
+  address: '서울 강남구 도산대로 123',
+  lat: 37.5900, lon: 127.0200,  // lng → lon
+  distance: 320, walkMinutes: 4, status: '운영중',
+},
   {
     id: 'S-002', name: '서대문구청', type: 'public',
     address: '서울 서대문구 이진아기념도서관길 33',
