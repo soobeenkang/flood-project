@@ -55,25 +55,6 @@ const findClickedGrid = (features, clickLng, clickLat) => {
   }, null)?.feature ?? null;
 };
 
-const getLatLngFromMapPoint = (kakaoMap, mapNode, x, y) => {
-  if (window.kakao?.maps?.Point && kakaoMap.getProjection) {
-    const projection = kakaoMap.getProjection();
-    const latLng = projection?.coordsFromContainerPoint?.(new window.kakao.maps.Point(x, y));
-    if (latLng) return { lat: latLng.getLat(), lng: latLng.getLng() };
-  }
-
-  const bounds = kakaoMap.getBounds();
-  const sw = bounds.getSouthWest();
-  const ne = bounds.getNorthEast();
-  const width = mapNode?.offsetWidth ?? 1;
-  const height = mapNode?.offsetHeight ?? 1;
-
-  return {
-    lat: sw.getLat() + (1 - y / height) * (ne.getLat() - sw.getLat()),
-    lng: sw.getLng() + (x / width) * (ne.getLng() - sw.getLng()),
-  };
-};
-
 const MapPage = ({ userLocation, onNavigateShelter }) => {
   const mapRef          = useRef(null);
   const canvasRef       = useRef(null);
@@ -85,6 +66,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
   const clickHandlerRef = useRef(null);
   const currentMarkerRef = useRef(null);
   const searchMarkerRef = useRef(null);
+  const selectedGridPolygonRef = useRef(null);
   const mapCenterRef = useRef(userLocation);
   const selectedGridIdRef = useRef(null);
 
@@ -209,9 +191,36 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     }
   };
 
+  const clearSelectedGrid = () => {
+    selectedGridIdRef.current = null;
+    selectedGridPolygonRef.current?.setMap(null);
+    selectedGridPolygonRef.current = null;
+    setSelectedGridId(null);
+  };
+
+  const renderSelectedGridPolygon = (feature) => {
+    const kakaoMap = kakaoMapRef.current;
+    if (!kakaoMap || !window.kakao?.maps?.Polygon) return;
+
+    selectedGridPolygonRef.current?.setMap(null);
+    selectedGridPolygonRef.current = new window.kakao.maps.Polygon({
+      path: feature.geometry.coordinates[0].map(([lng, lat]) => (
+        new window.kakao.maps.LatLng(lat, lng)
+      )),
+      strokeWeight: 4,
+      strokeColor: '#2563EB',
+      strokeOpacity: 1,
+      fillColor: '#3B82F6',
+      fillOpacity: 0.45,
+      zIndex: 20,
+    });
+    selectedGridPolygonRef.current.setMap(kakaoMap);
+  };
+
   const selectGrid = (feature) => {
     const gridId = String(feature.properties.grid_id);
     selectedGridIdRef.current = gridId;
+    renderSelectedGridPolygon(feature);
     setSelectedGridId(gridId);
     setEmailStep(true);
     redraw();
@@ -223,21 +232,6 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
 
     const found = findClickedGrid(features, lng, lat);
     if (found) selectGrid(found);
-  };
-
-  const handleAlertMapClick = (event) => {
-    const kakaoMap = kakaoMapRef.current;
-    if (!alertMode || emailStep || !kakaoMap) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-
-    const mapNode = mapRef.current;
-    const rect = mapNode?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const { lat, lng } = getLatLngFromMapPoint(kakaoMap, mapNode, x, y);
-    selectGridAtLatLng(lat, lng);
   };
 
   useEffect(() => {
@@ -311,8 +305,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
   }, [alertMode]);
 
   const closeAlertMode = () => {
-    selectedGridIdRef.current = null;
-    setSelectedGridId(null);
+    clearSelectedGrid();
     setEmailStep(false);
     setEmail('');
     setSubmitStatus(null);
@@ -407,24 +400,6 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
           pointerEvents: 'none', zIndex: 3,
         }} />
       </div>
-
-      {alertMode && !emailStep && (
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label="알림 받을 격자 선택"
-          onPointerDown={handleAlertMapClick}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 8,
-            border: 'none',
-            padding: 0,
-            background: 'transparent',
-            cursor: 'crosshair',
-          }}
-        />
-      )}
 
       {/* 상단 헤더 */}
       {!alertMode && (
@@ -619,9 +594,8 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
 
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={() => {
-                  selectedGridIdRef.current = null;
+                  clearSelectedGrid();
                   setEmailStep(false);
-                  setSelectedGridId(null);
                   redraw();
                 }} style={{
                   flex: 1, padding: '14px', background: '#F3F4F6', color: '#374151',
