@@ -14,6 +14,7 @@ const RoutePage = ({ userLocation, shelter }) => {
   const myMarkerRef   = useRef(null);
   const destMarkerRef = useRef(null);
   const shelterMarkersRef = useRef([]);
+  const routeRequestSeqRef = useRef(0);
 
   const [routeMode, setRouteMode] = useState('avoid_flood');
   const [routeInfo, setRouteInfo] = useState(null);
@@ -183,6 +184,9 @@ const RoutePage = ({ userLocation, shelter }) => {
   };
 
   const fetchRoute = async (mode, destination = selectedShelter) => {
+    const requestSeq = routeRequestSeqRef.current + 1;
+    routeRequestSeqRef.current = requestSeq;
+
     if (!destination) {
       setRouteInfo(null);
       setRouteError('지도나 목록에서 대피소를 선택해주세요.');
@@ -206,6 +210,8 @@ const RoutePage = ({ userLocation, shelter }) => {
         destLat, destLon,
         mode
       );
+      if (requestSeq !== routeRequestSeqRef.current) return;
+
       const avoidedGrids = data.avoidedGrids ?? 0;
       const hasFloodedSegment = data.hasFloodedSegment === true;
       const waypoints = data.waypoints ?? [];
@@ -235,11 +241,14 @@ const RoutePage = ({ userLocation, shelter }) => {
         }
       }
     } catch (e) {
+      if (requestSeq !== routeRequestSeqRef.current) return;
       console.error('[RoutePage]', e);
       setRouteInfo(null);
       setRouteError('경로 정보를 불러오지 못했습니다.');
     } finally {
-      setIsLoading(false);
+      if (requestSeq === routeRequestSeqRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
