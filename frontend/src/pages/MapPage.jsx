@@ -20,6 +20,60 @@ const SHOW_FROM = {
 };
 const LAYER_ORDER = ['6h', '3h', '1h', 'now'];
 
+const isPointInPolygon = (lng, lat, coords) => {
+  let inside = false;
+  for (let i = 0, j = coords.length - 1; i < coords.length; j = i++) {
+    const [lngI, latI] = coords[i];
+    const [lngJ, latJ] = coords[j];
+    const intersects =
+      latI > lat !== latJ > lat &&
+      lng < ((lngJ - lngI) * (lat - latI)) / (latJ - latI) + lngI;
+
+    if (intersects) inside = !inside;
+  }
+  return inside;
+};
+
+const findClickedGrid = (features, clickLng, clickLat) => {
+  const nearbyFeatures = features.filter((feature) => {
+    const { lon, lat } = feature.properties;
+    return Math.abs(lat - clickLat) < 0.002 && Math.abs(lon - clickLng) < 0.002;
+  });
+
+  const exact = nearbyFeatures.find((feature) => {
+    const coords = feature.geometry.coordinates[0];
+    return isPointInPolygon(clickLng, clickLat, coords);
+  });
+  if (exact) return exact;
+
+  const candidates = nearbyFeatures.length ? nearbyFeatures : features;
+  return candidates.reduce((nearest, feature) => {
+    const { lon, lat } = feature.properties;
+    const distance = Math.hypot(lat - clickLat, lon - clickLng);
+    if (!nearest || distance < nearest.distance) return { feature, distance };
+    return nearest;
+  }, null)?.feature ?? null;
+};
+
+const getLatLngFromMapPoint = (kakaoMap, mapNode, x, y) => {
+  if (window.kakao?.maps?.Point && kakaoMap.getProjection) {
+    const projection = kakaoMap.getProjection();
+    const latLng = projection?.coordsFromContainerPoint?.(new window.kakao.maps.Point(x, y));
+    if (latLng) return { lat: latLng.getLat(), lng: latLng.getLng() };
+  }
+
+  const bounds = kakaoMap.getBounds();
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const width = mapNode?.offsetWidth ?? 1;
+  const height = mapNode?.offsetHeight ?? 1;
+
+  return {
+    lat: sw.getLat() + (1 - y / height) * (ne.getLat() - sw.getLat()),
+    lng: sw.getLng() + (x / width) * (ne.getLng() - sw.getLng()),
+  };
+};
+
 const MapPage = ({ userLocation, onNavigateShelter }) => {
   const mapRef          = useRef(null);
   const canvasRef       = useRef(null);
@@ -28,10 +82,11 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
   const floodIdsRef     = useRef({ now: new Set(), '1h': new Set(), '3h': new Set(), '6h': new Set() });
   const rafRef          = useRef(null);
   const selectedTimeRef = useRef('now');
-  const clickListenerRef = useRef(null);
+  const clickHandlerRef = useRef(null);
   const currentMarkerRef = useRef(null);
   const searchMarkerRef = useRef(null);
   const mapCenterRef = useRef(userLocation);
+  const selectedGridIdRef = useRef(null);
 
   const [selectedTime, setSelectedTime]     = useState('now');
   const [isLoading, setIsLoading]           = useState(false);
@@ -97,8 +152,8 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
       });
 
       // 선택된 그리드 강조
-      if (selectedGridId !== null && features) {
-        const feature = features.find(f => String(f.properties.grid_id) === String(selectedGridId));
+      if (selectedGridIdRef.current !== null && features) {
+        const feature = features.find(f => String(f.properties.grid_id) === String(selectedGridIdRef.current));
         if (feature) {
           const coords = feature.geometry.coordinates[0];
           ctx.beginPath();
@@ -154,28 +209,35 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     }
   };
 
-  // 지도 클릭 → 그리드 선택
-  const handleMapClick = (kakaoMap) => {
-    return window.kakao.maps.event.addListener(kakaoMap, 'click', (e) => {
-      const features = featuresRef.current;
-      if (!features) return;
+  const selectGrid = (feature) => {
+    const gridId = String(feature.properties.grid_id);
+    selectedGridIdRef.current = gridId;
+    setSelectedGridId(gridId);
+    setEmailStep(true);
+    redraw();
+  };
 
-      const clickLat = e.latLng.getLat();
-      const clickLng = e.latLng.getLng();
+  const selectGridAtLatLng = (lat, lng) => {
+    const features = featuresRef.current;
+    if (!features) return;
 
-      // 클릭 위치가 포함된 그리드 찾기
-      const found = features.find((feature) => {
-        const { lon, lat } = feature.properties;
-        // 간단히 중심 좌표 기준 ±0.001 범위로 체크
-        return Math.abs(lat - clickLat) < 0.0009 && Math.abs(lon - clickLng) < 0.0009;
-      });
+    const found = findClickedGrid(features, lng, lat);
+    if (found) selectGrid(found);
+  };
 
-      if (found) {
-        setSelectedGridId(String(found.properties.grid_id));
-        setEmailStep(true);
-        redraw();
-      }
-    });
+  const handleAlertMapClick = (event) => {
+    const kakaoMap = kakaoMapRef.current;
+    if (!alertMode || emailStep || !kakaoMap) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const mapNode = mapRef.current;
+    const rect = mapNode?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const { lat, lng } = getLatLngFromMapPoint(kakaoMap, mapNode, x, y);
+    selectGridAtLatLng(lat, lng);
   };
 
   useEffect(() => {
@@ -197,16 +259,17 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
         window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    redraw);
         window.addEventListener('resize', redraw);
 
+        fetch('/seoul_grid.geojson').then(r => r.json()).then((geojson) => {
+          featuresRef.current = geojson.features;
+          redraw();
+        }).catch(e => console.error('[MapPage init]', e));
+
         Promise.all([
-          fetch('/seoul_grid.geojson').then(r => r.json()),
           fetchHeatmap('now'),
           fetchHeatmap('1h'),
           fetchHeatmap('3h'),
           fetchHeatmap('6h'),
-        ]).then(([geojson]) => {
-          featuresRef.current = geojson.features;
-          redraw();
-        }).catch(e => console.error('[MapPage init]', e));
+        ]).then(redraw).catch(e => console.error('[MapPage heatmap init]', e));
       }
     }, 100);
     return () => clearInterval(wait);
@@ -229,19 +292,33 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     if (!kakaoMap) return;
 
     if (alertMode) {
-      clickListenerRef.current = handleMapClick(kakaoMap);
+      const handleClick = (e) => {
+        const features = featuresRef.current;
+        if (!features) return;
+
+        selectGridAtLatLng(e.latLng.getLat(), e.latLng.getLng());
+      };
+
+      clickHandlerRef.current = handleClick;
+      window.kakao.maps.event.addListener(kakaoMap, 'click', handleClick);
     } else {
-      if (clickListenerRef.current) {
-        window.kakao.maps.event.removeListener(kakaoMap, 'click', clickListenerRef.current);
-        clickListenerRef.current = null;
+      if (clickHandlerRef.current) {
+        window.kakao.maps.event.removeListener(kakaoMap, 'click', clickHandlerRef.current);
+        clickHandlerRef.current = null;
       }
-      setSelectedGridId(null);
-      setEmailStep(false);
-      setEmail('');
-      setSubmitStatus(null);
       redraw();
     }
   }, [alertMode]);
+
+  const closeAlertMode = () => {
+    selectedGridIdRef.current = null;
+    setSelectedGridId(null);
+    setEmailStep(false);
+    setEmail('');
+    setSubmitStatus(null);
+    setAlertMode(false);
+    redraw();
+  };
 
   const handleTimeChange = (t) => {
     setSelectedTime(t);
@@ -331,6 +408,24 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
         }} />
       </div>
 
+      {alertMode && !emailStep && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="알림 받을 격자 선택"
+          onPointerDown={handleAlertMapClick}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 8,
+            border: 'none',
+            padding: 0,
+            background: 'transparent',
+            cursor: 'crosshair',
+          }}
+        />
+      )}
+
       {/* 상단 헤더 */}
       {!alertMode && (
         <div style={{
@@ -399,7 +494,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
               지도에서 원하는 격자를 클릭하세요
             </div>
           </div>
-          <button onClick={() => setAlertMode(false)} style={{
+          <button onClick={closeAlertMode} style={{
             background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white',
             width: 28, height: 28, borderRadius: '50%', cursor: 'pointer', fontSize: 14,
           }}>✕</button>
@@ -488,7 +583,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
               <div style={{ fontSize: 13, color: '#6B7280', marginBottom: 20 }}>
                 침수 감지 시 이메일로 알려드릴게요
               </div>
-              <button onClick={() => setAlertMode(false)} style={{
+              <button onClick={closeAlertMode} style={{
                 width: '100%', padding: '14px', background: '#3B82F6', color: 'white',
                 border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer',
               }}>확인</button>
@@ -523,7 +618,12 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
               )}
 
               <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => { setEmailStep(false); setSelectedGridId(null); redraw(); }} style={{
+                <button onClick={() => {
+                  selectedGridIdRef.current = null;
+                  setEmailStep(false);
+                  setSelectedGridId(null);
+                  redraw();
+                }} style={{
                   flex: 1, padding: '14px', background: '#F3F4F6', color: '#374151',
                   border: 'none', borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: 'pointer',
                 }}>다시 선택</button>
