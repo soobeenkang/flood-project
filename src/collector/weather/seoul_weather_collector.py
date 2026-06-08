@@ -44,7 +44,6 @@ import pandas as pd
 AUTH_KEY     = "auth key"
 GEOJSON_PATH = "서울격자 GeoJSON >>파일<< 경로 ex) ./seoul_grid.geojson"
 DB_DIR_PATH  = "db.py 파일 >>폴더<< 경로 ex) ./"
-INTERVAL     = 3600 # 수집 주기(sec)
 
 # ════════════════════════════════════════════════
 #  db.py 동적 경로 추가 및 임포트
@@ -271,7 +270,6 @@ def fetch_vsrt(auth_key: str, tmfc: str, tmef: str, var: str) -> list | None:
     params = {"tmfc": tmfc, "tmef": tmef, "vars": var, "authKey": auth_key}
     return _fetch(URL_VSRT, params, label=f"vsrt/{var} tmfc={tmfc} tmef={tmef}")
 
-
 # ════════════════════════════════════════════════
 # 6. 슬라이딩 윈도우 — 실황 RN1 최근 10개 유지
 # ════════════════════════════════════════════════
@@ -288,7 +286,6 @@ class GridWindow:
         self._window: deque = deque(maxlen=self.MAXLEN)
 
     def push(self, grid_values: list | None):
-        """새 스냅샷 추가. None이면 전부 None 배열로 대체."""
         self._window.append(
             grid_values if grid_values is not None
             else [None] * self.GRIDLEN
@@ -300,7 +297,6 @@ class GridWindow:
         return snapshot[idx]
 
     def current(self, idx: int) -> float | None:
-        """현재(최신 스냅샷) 값."""
         if not self._window:
             return None
         return self._val_at(self._window[-1], idx)
@@ -410,7 +406,7 @@ def run_cycle(
     return df_out
 
 # ════════════════════════════════════════════════
-# 9. 메인 루프 — 1시간 간격 반복 수집
+# 9. 메인 루프 — 정각 동기화 반복 수집
 # ════════════════════════════════════════════════
 
 def main():
@@ -418,10 +414,11 @@ def main():
     grid_mapping = build_grid_mapping(GEOJSON_PATH, converter)
     window       = GridWindow()
 
-    logger.info("수집 시작 (주기: %d초)", INTERVAL)
+    logger.info("날씨 수집기 가동 시작")
 
     while True:
         try:
+            # [수정] 루프 진입 즉시 수집 사이클 실행 (첫 실행 보장)
             run_cycle(
                 grid_mapping = grid_mapping,
                 window       = window,
@@ -430,8 +427,14 @@ def main():
         except Exception as exc:
             logger.error("사이클 오류: %s", exc, exc_info=True)
 
-        logger.info("다음 수집까지 %d초 대기...", INTERVAL)
-        time.sleep(INTERVAL)
+        # [수정] 다음 정각(00분 00초)까지 남은 시간을 계산하여 정확히 대기
+        now = datetime.now()
+        next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        sleep_seconds = (next_hour - now).total_seconds()
+
+        logger.info("다음 정각 수집시각(%s)까지 %d초 대기...", 
+                    next_hour.strftime("%H:%M:%S"), int(sleep_seconds))
+        time.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":
