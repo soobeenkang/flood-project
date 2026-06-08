@@ -65,7 +65,10 @@ async function getFloodedEdgeIds() {
     [[...floodedGridIds]],
   );
 
-  return edgeRows.map((r) => String(r.edge_id));
+  return {
+    edgeIds: edgeRows.map((r) => String(r.edge_id)),
+    gridIdsSet: floodedGridIds
+  };
 }
 
 // ── 좌표 → 가장 가까운 노드 ID ───────────────────────────────
@@ -193,19 +196,20 @@ async function buildGeometry(validPathRows) {
 
 // ── 공개 서비스 함수 ──────────────────────────────────────────
 
-export async function findEvacuationRoute(startLat, startLon, endLat, endLon) {
+export async function findEvacuationRoute(startLat, startLon, endLat, endLon, mode = 'avoid_flood') {
   // 병렬: 침수 엣지 수집 + 시작/끝 노드 탐색
-  const [floodedEdgeIds, startNode, endNode] = await Promise.all([
+  const [floodedData, startNode, endNode] = await Promise.all([
     getFloodedEdgeIds(),
     nearestNode(startLat, startLon),
     nearestNode(endLat, endLon),
   ]);
 
-  if (!startNode || !endNode) return null;
-  if (startNode === endNode) return null;
+  if (!startNode || !endNode || startNode === endNode) return null;
+
+  const floodedEdgeIds = floodedData?.edgeIds ?? [];
+  const floodedGridIdsSet = floodedData?.gridIdsSet ?? new Set();
 
   const normalPathRows = await runAStar(startNode, endNode, []);
-
   const pathRows = await runAStar(startNode, endNode, floodedEdgeIds);
   if (pathRows.length === 0) return null;
 
@@ -219,8 +223,7 @@ export async function findEvacuationRoute(startLat, startLon, endLat, endLon) {
   // --- [안전경로] -1 은 목적지 도착 행 (edge 없음) — 제외
   const validPathRows = [];
   pathRows.forEach((r) => {
-    if (r.edge === -1) return;
-    const currentEdge = String(r.edge);
+    if (r.edge === -1 || r.edge == null) return;
     
     // 직전 엣지와 똑같은 엣지가 연속으로 들어오면 스킵
     if (validPathRows.length > 0 && validPathRows[validPathRows.length - 1].edge === r.edge) {
@@ -230,18 +233,6 @@ export async function findEvacuationRoute(startLat, startLon, endLat, endLon) {
   });
 
   const edgeIds = validPathRows.map((r) => String(r.edge));
-  const totalCostM = pathRows[pathRows.length - 1]?.agg_cost ?? 0;
-
-  // 실제 도로 거리 (페널티 제외)
-  const { rows: distRows } = await pool.query(
-    `SELECT COALESCE(SUM(distance_m), 0) AS total_m
-     FROM road_edge
-     WHERE edge_id = ANY($1::bigint[])`,
-    [edgeIds],
-  );
-  const distanceM = parseFloat(distRows[0].total_m);
-
-  const coordinates = await buildGeometry(validPathRows);
 
   // -- [일반경로] 유효 엣지 정제 및 좌표 추출
   const validNormalPathRows = [];
@@ -254,69 +245,60 @@ export async function findEvacuationRoute(startLat, startLon, endLat, endLon) {
     });
   }
 
-  let normalCoordinates = [];
-  let normalDistanceM = 0;
-  let normalEdgeIds = [];
-
-  if (validNormalPathRows.length > 0) {
-    normalEdgeIds = validNormalPathRows.map((r) => String(r.edge));
-    const { rows: normalDistRows } = await pool.query(
-      `SELECT COALESCE(SUM(distance_m), 0) AS total_m FROM road_edge WHERE edge_id = ANY($1::bigint[])`,
-      [normalEdgeIds],
-    );
-    normalDistanceM = parseFloat(normalDistRows[0].total_m);
-    normalCoordinates = await buildGeometry(validNormalPathRows);
-  }
+  let normalEdgeIds = validNormalPathRows.map((r) => String(r.edge));
 
   // 경로에 침수 구간 포함 여부
   const floodedEdgeSet = new Set(floodedEdgeIds);
+
   let bypassedCount = 0;
 
-  if (normalEdgeIds.length > 0) {
-    const uniqueNormalEdges = new Set(normalEdgeIds);
-    uniqueNormalEdges.forEach(id => {
-      if (floodedEdgeSet.has(id)) bypassedCount++;
-    });
+  // 모드에 따라 다르게 저장
+  let targetEdgeIds = [];
+  let targetRows = [];
+  let hasFloodedSegment = false;
+  let responseAvoidedGrids = 0;
+
+  if (mode == 'fastest') {
+    targetEdgeIds = normalEdgeIds;
+    targetRows = validNormalPathRows;
+    hasFloodedSegment = normalEdgeIds.some(id => floodedEdgeSet.has(id));
+    responseAvoidedGrids = 0;
+  } else {
+    targetEdgeIds = edgeIds;
+    targetRows = validPathRows;
+    hasFloodedSegment = false;
+    
+    if (normalEdgeIds.length > 0) {
+      const { rows: normalGridRows } = await pool.query(
+        `SELECT DISTINCT grid_id FROM road_edge_grid WHERE edge_id = ANY($1::bigint[])`,
+        [[...new Set(normalEdgeIds)]]
+      );
+
+      normalGridRows.forEach(r => {
+        if (floodedGridIdsSet.has(String(r.grid_id))) {
+          bypassedCount++;
+        }
+      });
+    }
+
+    responseAvoidedGrids = bypassedCount;
   }
 
-  const hasFloodedSegment = edgeIds.some((id) => floodedEdgeSet.has(id));
+  if (targetEdgeIds.length == 0) return null;
+  const { rows: distRows } = await pool.query(
+    `SELECT COALESCE(SUM(distance_m), 0) AS total_m FROM road_edge WHERE edge_id = ANY($1::bigint[])`,
+    [targetEdgeIds],
+  );
+  const distanceM = parseFloat(distRows[0].total_m);
 
+  const coordinates = await buildGeometry(targetRows);
+  
   return {
-    type: 'FeatureCollection',
-    features: [
-      {
-        type: 'Feature',
-        id: 'safe_route',
-        geometry: {
-          type: 'LineString',
-          coordinates,
-        },
-        properties: {
-          routeType: 'safe',
-          distanceM: Math.round(distanceM),
-          hasFloodedSegment,
-          bypassedCount,
-          nodeCount: pathRows.length,
-          edgeCount: edgeIds.length,
-        },
-      },
-      {
-        type: 'Feature',
-        id: 'normal_route',
-        geometry: {
-          type: 'LineString',
-          coordinates: normalCoordinates,
-        },
-        properties: {
-          routeType: 'normal',
-          distanceM: Math.round(normalDistanceM),
-          hasFloodedSegment: bypassedCount > 0,
-          nodeCount: pathRows.length,
-          edgeCount: edgeIds.length,
-        },
-      },
-    ],
-  };
+    distanceM: Math.round(distanceM),
+    hasFloodedSegment,
+    avoidedGrids: responseAvoidedGrids,
+    coordinates
+  }
 }
 
 export default { findEvacuationRoute };

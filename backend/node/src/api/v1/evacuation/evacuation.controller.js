@@ -6,6 +6,7 @@ export async function getEvacuationRoute(req, res, next) {
     const startLon = parseFloat(req.query.startLon);
     const endLat   = parseFloat(req.query.endLat);
     const endLon   = parseFloat(req.query.endLon);
+    const mode = req.query.mode || 'avoid_flood';
 
     if ([startLat, startLon, endLat, endLon].some(isNaN)) {
       return res.status(400).json({
@@ -23,7 +24,7 @@ export async function getEvacuationRoute(req, res, next) {
       });
     }
 
-    const result = await routeService.findEvacuationRoute(startLat, startLon, endLat, endLon);
+    const result = await routeService.findEvacuationRoute(startLat, startLon, endLat, endLon, mode);
 
     if (!result) {
       return res.status(404).json({
@@ -32,21 +33,17 @@ export async function getEvacuationRoute(req, res, next) {
       });
     }
 
-    // GeoJSON → 프론트엔드 형식 변환
-    const feature = result.features[0];
-    const props   = feature.properties;
-    const coords  = feature.geometry.coordinates; // [[lon, lat], ...]
-
-    const distanceM   = props.distanceM;
+    const distanceM   = result.distanceM;
     const totalMinutes = Math.round(distanceM / 80);  // 도보 속도 ~80m/min
 
     // coordinates → waypoints 변환 (kakao는 {lat, lon} 형식 필요)
-    const waypoints = coords.map(([lon, lat]) => ({ lat, lon }));
+    const waypoints = result.coordinates.map(([lon, lat]) => ({ lat, lon }));
 
     return res.json({
       totalMinutes,
-      totalDistance:   distanceM,
-      avoidedGrids:    props.hasFloodedSegment ? 1 : 0,  // 또는 별도 카운트 필요시 서비스에서 반환
+      totalDistance: distanceM,
+      avoidedGrids: result.avoidedGrids,
+      hasFloodedSegment: result.hasFloodedSegment,
       waypoints,
     });
   } catch (err) {
