@@ -9,3 +9,7 @@ uvicorn
 fastapi
 openpyxl
 pyarrow
+apscheduler
+requests
+geoalchemy2
+pandas
