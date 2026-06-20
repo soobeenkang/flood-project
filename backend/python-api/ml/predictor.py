@@ -1,11 +1,11 @@
-import json
 from pathlib import Path
 
-import joblib
+import lightgbm as lgb
+
+from ml.config import FEATURE_COLS, DEFAULT_THRESHOLD
 
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = BASE_DIR / "model"
 
 
 class Predictor:
@@ -16,27 +16,20 @@ class Predictor:
 
     @classmethod
     def load_latest(cls):
-        model_path = MODEL_DIR / "xgboost_flood.pkl"
-        meta_path = MODEL_DIR / "xgboost_flood_meta.json"
-        feature_cols_path = MODEL_DIR / "feature_cols.json"
+        model_path = BASE_DIR /"model"/ "flood_lgbm_model2.txt"
 
-        model = joblib.load(model_path)
+        model = lgb.Booster(model_file=str(model_path))
 
-        with open(feature_cols_path, "r", encoding="utf-8") as f:
-            feature_cols = json.load(f)
-
-        with open(meta_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-
-        feature_cols = meta["feature_cols"]
-        threshold = meta.get("best_threshold", 0.5)
-
-        return cls(model, threshold, feature_cols)
+        return cls(
+            model=model,
+            threshold=DEFAULT_THRESHOLD,
+            feature_cols=FEATURE_COLS,
+        )
 
     def predict(self, feature_df):
         X = feature_df[self.feature_cols]
 
-        prob = self.model.predict_proba(X)[:, 1]
+        prob = self.model.predict(X)
         pred = (prob >= self.threshold).astype(int)
 
         return pred, prob
