@@ -33,6 +33,8 @@ import logging
 import sys
 from datetime import datetime, timedelta
 from collections import deque
+from sqlalchemy import dialects
+from sqlalchemy.dialects.postgresql import insert
 
 import os
 from dotenv import load_dotenv
@@ -45,12 +47,11 @@ from pathlib import Path
 # ════════════════════════════════════════════════
 #  사용자 설정 상수
 # ════════════════════════════════════════════════
-BASE_DIR = Path(__file__).resolve().parents[2]
-PYTHON_API_DIR = Path(__file__).resolve().parents[3]
-PROJECT_ROOT = Path(__file__).resolve().parents[5]
+PYTHON_API_DIR = Path("/app") 
+PROJECT_ROOT = Path("/app") # 도커 컴포즈에서 env_file을 썼다면 필요 없을 수 있음
 
+# .env 로드 (도커 환경변수가 우선이지만 하위 호환용)
 load_dotenv(PROJECT_ROOT / ".env")
-
 AUTH_KEY = os.getenv("WEATHER_AUTH_KEY")
 
 
@@ -183,10 +184,15 @@ def get_latest_tmfc() -> str:
     현재 시각 기준 안전한 발표시각 반환 — yyyymmddhhmm.
     LAG_MIN(20분)을 뺀 뒤 10분 단위로 내림.
     """
-    lagged = datetime.now() - timedelta(minutes=LAG_MIN)
-    minute = (lagged.minute // 10) * 10
-    t      = lagged.replace(minute=minute, second=0, microsecond=0)
-    return t.strftime("%Y%m%d%H%M")
+    now = datetime.now()
+    
+    # 현재 분이 45분 미만이면 아직 이번 시간대 데이터가 생성되지 않았으므로 '1시간 전 40분' 데이터 타겟팅
+    if now.minute < 45:
+        target_time = (now - timedelta(hours=1)).replace(minute=40, second=0, microsecond=0)
+    else:
+        target_time = now.replace(minute=40, second=0, microsecond=0)
+
+    return target_time.strftime("%Y%m%d%H%M")
 
 
 def tmfc_to_tmef(tmfc: str, hours: int) -> str:
@@ -337,9 +343,21 @@ def extract(grid: list | None, idx: int) -> float | None:
         return None
     return grid[idx]
 
+def insert_on_conflict(table, conn, keys, data_iter):
+    data = [dict(zip(keys, row)) for row in data_iter]
+    stmt = insert(table.table).values(data)
+    
+    # 충돌 발생 시 업데이트할 컬럼들 목록 세팅 (grid_id, tmfc 제외한 나머지 변수들)
+    update_dict = {c.name: c for c in stmt.excluded if c.name not in ['grid_id', 'tmfc']}
+    
+    on_conflict_stmt = stmt.on_conflict_do_update(
+        index_elements=['grid_id', 'tmfc'],
+        set_=update_dict
+    )
+    conn.execute(on_conflict_stmt)
 
 # ════════════════════════════════════════════════
-# 8. 한 사이클: API 호출 → Parquet 저장
+# 8. 한 사이클: API 호출 → db 저장
 # ════════════════════════════════════════════════
 
 def run_cycle(
@@ -372,6 +390,9 @@ def run_cycle(
     odam_t1h = fetch_odam(auth_key, tmfc, var="T1H")
     odam_vec = fetch_odam(auth_key, tmfc, var="VEC")
     odam_wsd = fetch_odam(auth_key, tmfc, var="WSD")
+    if odam_rn1 is None:
+        logger.error("[날씨 api] 기상청 실황 rn1 데이터 가져오지 못함. 사이클 스킵")
+        return None
     window.push(odam_rn1)   # RN1만 슬라이딩 윈도우에 유지
 
     # ── 8-2. 초단기예보 조회 ─────────────────────
@@ -411,7 +432,7 @@ def run_cycle(
 
     df_out = pd.DataFrame(data)
 
-    # ── 8-4. Parquet 저장 ────────────────────────
+    # ── 8-4. db 저장 ────────────────────────
     engine = get_engine()
     with engine.begin() as conn:
         df_out.to_sql(
@@ -419,7 +440,7 @@ def run_cycle(
             con       = conn,
             if_exists = "append",
             index     = False,
-            method    = "multi",
+            method    = insert_on_conflict,
         )
     logger.info("DB 저장 완료 → 테이블: %s  (행: %d)", DB_TABLE, len(df_out))
 
@@ -429,6 +450,28 @@ def run_cycle(
 # 9. 메인 루프 — 1시간 간격 반복 수집
 # ════════════════════════════════════════════════
 
+# 외부에서 스케줄러가 매번 GeoJSON을 다시 읽지 않도록 미리 초기화해둡니다.
+converter = LCCConverter()
+grid_mapping = build_grid_mapping(GEOJSON_PATH, converter)
+window = GridWindow()
+
+
+def collect_weather_data():
+    """
+    APScheduler가 매 정각마다 호출할 단일 실행 함수입니다.
+    기존에 1시간마다 무한 루프 돌던 부분을 1회성 사이클 함수로 연결합니다.
+    """
+    logger.info("⏰ [스케줄러 펑션] 날씨 API 정기 수집 가동")
+    try:
+        run_cycle(
+            grid_mapping=grid_mapping,
+            window=window,
+            auth_key=AUTH_KEY,
+        )
+    except Exception as exc:
+        logger.error("정기 수집 사이클 오류: %s", exc, exc_info=True)
+
+'''
 def main():
     converter    = LCCConverter()
     grid_mapping = build_grid_mapping(GEOJSON_PATH, converter)
@@ -452,3 +495,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+'''

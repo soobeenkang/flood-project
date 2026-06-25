@@ -1,20 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { HEATMAP_COLORS, SHELTER_TYPES } from '../data/mockData';
 import { getEvacRoute, getHeatmapGrids, getShelters } from '../services/api';
-import { createCurrentLocationOverlay } from '../utils/mapOverlays';
+import { createCurrentLocationOverlay, getGridCoords, getVisibleRequestArea } from '../utils/mapOverlays';
 
 const RoutePage = ({ userLocation, shelter }) => {
   const mapRef        = useRef(null);
   const canvasRef     = useRef(null);
   const kakaoMapRef   = useRef(null);
-  const featuresRef   = useRef(null);
-  const floodIdsRef   = useRef(new Set());
+  const floodedGridsRef = useRef([]);
   const rafRef        = useRef(null);
   const polylineRef   = useRef(null);
   const myMarkerRef   = useRef(null);
   const destMarkerRef = useRef(null);
   const shelterMarkersRef = useRef([]);
   const routeRequestSeqRef = useRef(0);
+  const heatmapTimerRef = useRef(null);
+  const heatmapRequestKeyRef = useRef('');
+  const heatmapSeqRef = useRef(0);
 
   const [routeMode, setRouteMode] = useState('avoid_flood');
   const [routeInfo, setRouteInfo] = useState(null);
@@ -37,16 +39,32 @@ const RoutePage = ({ userLocation, shelter }) => {
     }
   };
 
-  const fetchCurrentHeatmap = async () => {
+  const fetchCurrentHeatmap = async (area) => {
     try {
-      const data = await getHeatmapGrids(userLocation.lat, userLocation.lng, 'now', 5000);
-      floodIdsRef.current = new Set(
-        (data.grids ?? []).filter(g => g.isFlooded).map(g => String(g.grid_id))
-      );
+      const data = await getHeatmapGrids(area.lat, area.lng, 'now', area.radius);
+      floodedGridsRef.current = (data.grids ?? []).filter(g => g.isFlooded);
     } catch (e) {
       console.error('[RoutePage] 히트맵 fetch 실패:', e);
-      floodIdsRef.current = new Set();
+      floodedGridsRef.current = [];
     }
+  };
+
+  const refreshVisibleHeatmap = async (kakaoMap = kakaoMapRef.current) => {
+    if (!kakaoMap) return;
+    const area = getVisibleRequestArea(kakaoMap);
+    const requestKey = `${area.lat.toFixed(4)}:${area.lng.toFixed(4)}:${area.radius}`;
+    if (requestKey === heatmapRequestKeyRef.current) return;
+
+    heatmapRequestKeyRef.current = requestKey;
+    const requestSeq = heatmapSeqRef.current + 1;
+    heatmapSeqRef.current = requestSeq;
+    await fetchCurrentHeatmap(area);
+    if (requestSeq === heatmapSeqRef.current) redraw();
+  };
+
+  const scheduleVisibleHeatmapRefresh = () => {
+    if (heatmapTimerRef.current) clearTimeout(heatmapTimerRef.current);
+    heatmapTimerRef.current = setTimeout(() => refreshVisibleHeatmap(), 250);
   };
 
   const redraw = () => {
@@ -54,8 +72,7 @@ const RoutePage = ({ userLocation, shelter }) => {
     rafRef.current = requestAnimationFrame(() => {
       const canvas   = canvasRef.current;
       const kakaoMap = kakaoMapRef.current;
-      const features = featuresRef.current;
-      if (!canvas || !kakaoMap || !features) return;
+      if (!canvas || !kakaoMap) return;
 
       canvas.width  = canvas.offsetWidth;
       canvas.height = canvas.offsetHeight;
@@ -72,14 +89,15 @@ const RoutePage = ({ userLocation, shelter }) => {
       const lngToX = (lng) => (lng - sw.getLng()) / (ne.getLng() - sw.getLng()) * W;
       const latToY = (lat) => (1 - (lat - sw.getLat()) / (ne.getLat() - sw.getLat())) * H;
 
-      const currentIds = floodIdsRef.current;
-      features.forEach((feature) => {
-        const { grid_id, lon, lat } = feature.properties;
-        if (!currentIds.has(String(grid_id))) return;
+      floodedGridsRef.current.forEach((grid) => {
+        const lat = grid.lat;
+        const lon = grid.lon ?? grid.lng;
+        if (lat === undefined || lon === undefined) return;
         if (lon < sw.getLng() || lon > ne.getLng() ||
             lat < sw.getLat() || lat > ne.getLat()) return;
 
-        const coords = feature.geometry.coordinates[0];
+        const coords = getGridCoords(grid);
+        if (!coords) return;
         ctx.beginPath();
         coords.forEach(([lng, la], i) => {
           const x = lngToX(lng);
@@ -264,22 +282,23 @@ const RoutePage = ({ userLocation, shelter }) => {
         renderCurrentLocation(kakaoMap);
 
         window.kakao.maps.event.addListener(kakaoMap, 'center_changed', redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'dragend',        redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    redraw);
+        window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   scheduleVisibleHeatmapRefresh);
+        window.kakao.maps.event.addListener(kakaoMap, 'dragend',        scheduleVisibleHeatmapRefresh);
+        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    scheduleVisibleHeatmapRefresh);
 
         Promise.all([
-          fetch('/seoul_grid.geojson').then(r => r.json()),
-          fetchCurrentHeatmap(),
+          refreshVisibleHeatmap(kakaoMap),
           fetchShelters(),
-        ]).then(([geojson]) => {
-          featuresRef.current = geojson.features;
+        ]).then(() => {
           redraw();
           if (selectedShelter) fetchRoute(routeMode, selectedShelter);
         }).catch(e => console.error('[RoutePage init]', e));
       }
     }, 100);
-    return () => clearInterval(wait);
+    return () => {
+      clearInterval(wait);
+      if (heatmapTimerRef.current) clearTimeout(heatmapTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -287,7 +306,7 @@ const RoutePage = ({ userLocation, shelter }) => {
     if (!kakaoMap || !window.kakao?.maps) return;
 
     renderCurrentLocation(kakaoMap);
-    fetchCurrentHeatmap().then(redraw);
+    refreshVisibleHeatmap(kakaoMap);
     fetchShelters();
     const timer = setTimeout(() => {
       if (selectedShelter) fetchRoute(routeMode, selectedShelter);

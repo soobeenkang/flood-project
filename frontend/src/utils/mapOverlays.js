@@ -71,3 +71,53 @@ export const createSearchLocationOverlay = (kakao, location) => {
     zIndex: 11,
   });
 };
+
+export const GRID_HALF_LAT = 0.00045;
+export const GRID_HALF_LON = 0.00057;
+
+export const getGridCoords = (grid) => {
+  const lat = grid.lat;
+  const lng = grid.lon ?? grid.lng;
+  if (lat === undefined || lng === undefined) return null;
+
+  return [
+    [lng - GRID_HALF_LON, lat - GRID_HALF_LAT],
+    [lng + GRID_HALF_LON, lat - GRID_HALF_LAT],
+    [lng + GRID_HALF_LON, lat + GRID_HALF_LAT],
+    [lng - GRID_HALF_LON, lat + GRID_HALF_LAT],
+  ];
+};
+
+const getDistanceMeters = (a, b) => {
+  const toRad = (value) => value * Math.PI / 180;
+  const earthRadius = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+
+  return earthRadius * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+};
+
+export const getVisibleRequestArea = (kakaoMap) => {
+  const center = kakaoMap.getCenter();
+  const bounds = kakaoMap.getBounds();
+  const sw = bounds.getSouthWest();
+  const ne = bounds.getNorthEast();
+  const centerPoint = { lat: center.getLat(), lng: center.getLng() };
+  const corners = [
+    { lat: sw.getLat(), lng: sw.getLng() },
+    { lat: sw.getLat(), lng: ne.getLng() },
+    { lat: ne.getLat(), lng: sw.getLng() },
+    { lat: ne.getLat(), lng: ne.getLng() },
+  ];
+  const radius = Math.ceil(Math.max(...corners.map((corner) => getDistanceMeters(centerPoint, corner))) * 1.15);
+
+  return {
+    lat: centerPoint.lat,
+    lng: centerPoint.lng,
+    radius: Math.min(Math.max(radius, 1000), 10000),
+  };
+};

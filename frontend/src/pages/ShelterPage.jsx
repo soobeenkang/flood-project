@@ -1,28 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { HEATMAP_COLORS, SHELTER_TYPES } from '../data/mockData';
 import { getHeatmapGrids, getShelters } from '../services/api';
-import { createCurrentLocationOverlay } from '../utils/mapOverlays';
-
-const distanceMeters = (a, b) => {
-  const toRad = (value) => value * Math.PI / 180;
-  const R = 6371000;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-
-  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-};
+import { createCurrentLocationOverlay, getGridCoords, getVisibleRequestArea } from '../utils/mapOverlays';
 
 const ShelterPage = ({ userLocation, onNavigateRoute }) => {
   const mapRef      = useRef(null);
   const canvasRef   = useRef(null);
   const kakaoMapRef = useRef(null);
-  const featuresRef = useRef(null);
-  const floodIdsRef = useRef(new Set());
+  const floodedGridsRef = useRef([]);
   const rafRef      = useRef(null);
   const markersRef  = useRef([]);
   const currentMarkerRef = useRef(null);
@@ -59,15 +44,13 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     }
   };
 
-  const fetchCurrentHeatmap = async (center = mapCenterRef.current) => {
+  const fetchCurrentHeatmap = async (area) => {
     try {
-      const data = await getHeatmapGrids(center.lat, center.lng, 'now', 5000);
-      floodIdsRef.current = new Set(
-        (data.grids ?? []).filter(g => g.isFlooded).map(g => String(g.grid_id))
-      );
+      const data = await getHeatmapGrids(area.lat, area.lng, 'now', area.radius);
+      floodedGridsRef.current = (data.grids ?? []).filter(g => g.isFlooded);
     } catch (e) {
       console.error('[ShelterPage] 히트맵 fetch 실패:', e);
-      floodIdsRef.current = new Set();
+      floodedGridsRef.current = [];
     }
   };
 
@@ -77,8 +60,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     rafRef.current = requestAnimationFrame(() => {
       const canvas   = canvasRef.current;
       const kakaoMap = kakaoMapRef.current;
-      const features = featuresRef.current;
-      if (!canvas || !kakaoMap || !features) return;
+      if (!canvas || !kakaoMap) return;
 
       canvas.width  = canvas.offsetWidth;
       canvas.height = canvas.offsetHeight;
@@ -95,14 +77,15 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
       const lngToX = (lng) => (lng - sw.getLng()) / (ne.getLng() - sw.getLng()) * W;
       const latToY = (lat) => (1 - (lat - sw.getLat()) / (ne.getLat() - sw.getLat())) * H;
 
-      const currentIds = floodIdsRef.current;
-      features.forEach((feature) => {
-        const { grid_id, lon, lat } = feature.properties;
-        if (!currentIds.has(String(grid_id))) return;
+      floodedGridsRef.current.forEach((grid) => {
+        const lat = grid.lat;
+        const lon = grid.lon ?? grid.lng;
+        if (lat === undefined || lon === undefined) return;
         if (lon < sw.getLng() || lon > ne.getLng() ||
             lat < sw.getLat() || lat > ne.getLat()) return;
 
-        const coords = feature.geometry.coordinates[0];
+        const coords = getGridCoords(grid);
+        if (!coords) return;
         ctx.beginPath();
         coords.forEach(([lng, la], i) => {
           const x = lngToX(lng);
@@ -160,38 +143,16 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     currentMarkerRef.current?.setMap(kakaoMap);
   };
 
-  const getMapCenter = (kakaoMap) => {
-    const center = kakaoMap.getCenter();
-    return { lat: center.getLat(), lng: center.getLng() };
-  };
-
-  const getMapSearchRadius = (kakaoMap, center) => {
-    const bounds = kakaoMap.getBounds();
-    const sw = bounds.getSouthWest();
-    const ne = bounds.getNorthEast();
-    const corners = [
-      { lat: sw.getLat(), lng: sw.getLng() },
-      { lat: sw.getLat(), lng: ne.getLng() },
-      { lat: ne.getLat(), lng: sw.getLng() },
-      { lat: ne.getLat(), lng: ne.getLng() },
-    ];
-
-    return Math.ceil(Math.max(
-      3000,
-      ...corners.map((corner) => distanceMeters(center, corner)),
-    ));
-  };
-
   const refreshAroundMapCenter = async (type = filterTypeRef.current) => {
     const kakaoMap = kakaoMapRef.current;
     if (!kakaoMap) return;
 
-    const center = getMapCenter(kakaoMap);
-    const radius = getMapSearchRadius(kakaoMap, center);
+    const area = getVisibleRequestArea(kakaoMap);
+    const center = { lat: area.lat, lng: area.lng };
     mapCenterRef.current = center;
     await Promise.all([
-      fetchCurrentHeatmap(center),
-      fetchShelters(type, center, radius),
+      fetchCurrentHeatmap(area),
+      fetchShelters(type, center, area.radius),
     ]);
     drawCanvas();
   };
@@ -220,13 +181,10 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
         window.kakao.maps.event.addListener(kakaoMap, 'center_changed', drawCanvas);
         window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   scheduleRefreshAroundMapCenter);
         window.kakao.maps.event.addListener(kakaoMap, 'dragend',        scheduleRefreshAroundMapCenter);
-        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    drawCanvas);
+        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    scheduleRefreshAroundMapCenter);
 
-        Promise.all([
-          fetch('/seoul_grid.geojson').then(r => r.json()),
-          fetchCurrentHeatmap(),
-        ]).then(([geojson]) => {
-          featuresRef.current = geojson.features;
+        refreshAroundMapCenter()
+        .then(() => {
           drawCanvas();
           setMapReady(true);
         }).catch(e => console.error('[ShelterPage init]', e));
@@ -245,15 +203,14 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     mapCenterRef.current = userLocation;
     kakaoMap.setCenter(new window.kakao.maps.LatLng(userLocation.lat, userLocation.lng));
     renderCurrentLocation(kakaoMap);
-    fetchCurrentHeatmap(userLocation).then(drawCanvas);
-    fetchShelters(filterType, userLocation, getMapSearchRadius(kakaoMap, userLocation));
+    refreshAroundMapCenter(filterType);
   }, [userLocation]);
 
   // ── 필터 변경 시 ──────────────────────────────────────────────────────
   useEffect(() => {
     filterTypeRef.current = filterType;
     const kakaoMap = kakaoMapRef.current;
-    const radius = kakaoMap ? getMapSearchRadius(kakaoMap, mapCenterRef.current) : 3000;
+    const radius = kakaoMap ? getVisibleRequestArea(kakaoMap).radius : 3000;
     fetchShelters(filterType, mapCenterRef.current, radius);
   }, [filterType]);
 
@@ -279,8 +236,7 @@ const ShelterPage = ({ userLocation, onNavigateRoute }) => {
     kakaoMap.setLevel(6);
     mapCenterRef.current = userLocation;
     renderCurrentLocation(kakaoMap);
-    fetchCurrentHeatmap(userLocation).then(drawCanvas);
-    fetchShelters(filterType, userLocation, getMapSearchRadius(kakaoMap, userLocation));
+    refreshAroundMapCenter(filterType);
   };
 
   return (
