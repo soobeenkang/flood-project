@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { MOCK_HEATMAP, HEATMAP_COLORS } from '../data/mockData';
+import { HEATMAP_COLORS } from '../data/mockData';
 import { getHeatmapGrids, subscribeToGrid } from '../services/api';
-import { createCurrentLocationOverlay, createSearchLocationOverlay } from '../utils/mapOverlays';
+import {
+  createCurrentLocationOverlay,
+  createSearchLocationOverlay,
+  getGridCoords,
+  getVisibleRequestArea,
+} from '../utils/mapOverlays';
 
 const USE_MOCK = false;
 
@@ -34,33 +39,37 @@ const isPointInPolygon = (lng, lat, coords) => {
   return inside;
 };
 
-const findClickedGrid = (features, clickLng, clickLat) => {
-  const nearbyFeatures = features.filter((feature) => {
-    const { lon, lat } = feature.properties;
+const findClickedGrid = (grids, clickLng, clickLat) => {
+  const nearbyGrids = grids.filter((grid) => {
+    const lat = grid.lat;
+    const lon = grid.lon ?? grid.lng;
+    if (lat === undefined || lon === undefined) return false;
     return Math.abs(lat - clickLat) < 0.002 && Math.abs(lon - clickLng) < 0.002;
   });
 
-  const exact = nearbyFeatures.find((feature) => {
-    const coords = feature.geometry.coordinates[0];
-    return isPointInPolygon(clickLng, clickLat, coords);
+  const exact = nearbyGrids.find((grid) => {
+    const coords = getGridCoords(grid);
+    return coords && isPointInPolygon(clickLng, clickLat, coords);
   });
   if (exact) return exact;
 
-  const candidates = nearbyFeatures.length ? nearbyFeatures : features;
-  return candidates.reduce((nearest, feature) => {
-    const { lon, lat } = feature.properties;
+  const candidates = nearbyGrids.length ? nearbyGrids : grids;
+  return candidates.reduce((nearest, grid) => {
+    const lat = grid.lat;
+    const lon = grid.lon ?? grid.lng;
+    if (lat === undefined || lon === undefined) return nearest;
     const distance = Math.hypot(lat - clickLat, lon - clickLng);
-    if (!nearest || distance < nearest.distance) return { feature, distance };
+    if (!nearest || distance < nearest.distance) return { grid, distance };
     return nearest;
-  }, null)?.feature ?? null;
+  }, null)?.grid ?? null;
 };
 
 const MapPage = ({ userLocation, onNavigateShelter }) => {
   const mapRef          = useRef(null);
   const canvasRef       = useRef(null);
   const kakaoMapRef     = useRef(null);
-  const featuresRef     = useRef(null);
-  const floodIdsRef     = useRef({ now: new Set(), '1h': new Set(), '3h': new Set(), '6h': new Set() });
+  const visibleGridsRef = useRef([]);
+  const floodedGridsRef = useRef({ now: [], '1h': [], '3h': [], '6h': [] });
   const rafRef          = useRef(null);
   const selectedTimeRef = useRef('now');
   const clickHandlerRef = useRef(null);
@@ -69,6 +78,9 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
   const selectedGridPolygonRef = useRef(null);
   const mapCenterRef = useRef(userLocation);
   const selectedGridIdRef = useRef(null);
+  const heatmapTimerRef = useRef(null);
+  const heatmapRequestKeyRef = useRef('');
+  const heatmapSeqRef = useRef(0);
 
   const [selectedTime, setSelectedTime]     = useState('now');
   const [isLoading, setIsLoading]           = useState(false);
@@ -87,8 +99,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     rafRef.current = requestAnimationFrame(() => {
       const canvas   = canvasRef.current;
       const kakaoMap = kakaoMapRef.current;
-      const features = featuresRef.current;
-      if (!canvas || !kakaoMap || !features) return;
+      if (!canvas || !kakaoMap) return;
 
       canvas.width  = canvas.offsetWidth;
       canvas.height = canvas.offsetHeight;
@@ -110,16 +121,17 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
 
       LAYER_ORDER.forEach((layer) => {
         if (!layersToShow.has(layer)) return;
-        const ids   = floodIdsRef.current[layer];
         const color = HEATMAP_COLORS[layer];
 
-        features.forEach((feature) => {
-          const { grid_id, lon, lat } = feature.properties;
-          if (!ids.has(String(grid_id))) return;
+        floodedGridsRef.current[layer].forEach((grid) => {
+          const lat = grid.lat;
+          const lon = grid.lon ?? grid.lng;
+          if (lat === undefined || lon === undefined) return;
           if (lon < sw.getLng() || lon > ne.getLng() ||
               lat < sw.getLat() || lat > ne.getLat()) return;
 
-          const coords = feature.geometry.coordinates[0];
+          const coords = getGridCoords(grid);
+          if (!coords) return;
           ctx.beginPath();
           coords.forEach(([lng, la], i) => {
             const x = lngToX(lng);
@@ -134,10 +146,11 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
       });
 
       // 선택된 그리드 강조
-      if (selectedGridIdRef.current !== null && features) {
-        const feature = features.find(f => String(f.properties.grid_id) === String(selectedGridIdRef.current));
-        if (feature) {
-          const coords = feature.geometry.coordinates[0];
+      if (selectedGridIdRef.current !== null) {
+        const grid = visibleGridsRef.current.find(g => String(g.grid_id) === String(selectedGridIdRef.current));
+        if (grid) {
+          const coords = getGridCoords(grid);
+          if (!coords) return;
           ctx.beginPath();
           coords.forEach(([lng, la], i) => {
             const x = lngToX(lng);
@@ -162,33 +175,52 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     currentMarkerRef.current?.setMap(kakaoMap);
   };
 
-  const fetchHeatmap = async (horizon, center = mapCenterRef.current) => {
+  const fetchHeatmap = async (horizon, area) => {
     if (USE_MOCK) {
-      floodIdsRef.current[horizon] = new Set(MOCK_HEATMAP[horizon] ?? []);
+      floodedGridsRef.current[horizon] = [];
       return;
     }
-    const { lat, lng } = center;
-    const data = await getHeatmapGrids(lat, lng, horizon, 5000);
-    floodIdsRef.current[horizon] = new Set(
-      data.grids.filter(g => g.isFlooded).map(g => String(g.grid_id))
-    );
+    const data = await getHeatmapGrids(area.lat, area.lng, horizon, area.radius);
+    const grids = data.grids ?? [];
+    if (horizon === 'now') visibleGridsRef.current = grids;
+    floodedGridsRef.current[horizon] = grids.filter(g => g.isFlooded);
+  };
+
+  const refreshVisibleHeatmap = async (kakaoMap = kakaoMapRef.current) => {
+    if (!kakaoMap) return;
+    const area = getVisibleRequestArea(kakaoMap);
+    const requestKey = `${area.lat.toFixed(4)}:${area.lng.toFixed(4)}:${area.radius}`;
+    if (requestKey === heatmapRequestKeyRef.current) return;
+
+    heatmapRequestKeyRef.current = requestKey;
+    mapCenterRef.current = { lat: area.lat, lng: area.lng };
+    const requestSeq = heatmapSeqRef.current + 1;
+    heatmapSeqRef.current = requestSeq;
+    setIsLoading(true);
+
+    try {
+      await Promise.all(LAYER_ORDER.map((horizon) => fetchHeatmap(horizon, area)));
+      if (requestSeq === heatmapSeqRef.current) redraw();
+    } catch (e) {
+      console.error('[MapPage heatmap refresh]', e);
+      if (requestSeq === heatmapSeqRef.current) {
+        visibleGridsRef.current = [];
+        floodedGridsRef.current = { now: [], '1h': [], '3h': [], '6h': [] };
+        redraw();
+      }
+    } finally {
+      if (requestSeq === heatmapSeqRef.current) setIsLoading(false);
+    }
   };
 
   const refreshHeatmapAround = async (center) => {
-    setIsLoading(true);
-    try {
-      await Promise.all([
-        fetchHeatmap('now', center),
-        fetchHeatmap('1h', center),
-        fetchHeatmap('3h', center),
-        fetchHeatmap('6h', center),
-      ]);
-      redraw();
-    } catch (e) {
-      console.error('[MapPage heatmap refresh]', e);
-    } finally {
-      setIsLoading(false);
-    }
+    mapCenterRef.current = center;
+    await refreshVisibleHeatmap();
+  };
+
+  const scheduleVisibleHeatmapRefresh = () => {
+    if (heatmapTimerRef.current) clearTimeout(heatmapTimerRef.current);
+    heatmapTimerRef.current = setTimeout(() => refreshVisibleHeatmap(), 250);
   };
 
   const clearSelectedGrid = () => {
@@ -198,13 +230,16 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     setSelectedGridId(null);
   };
 
-  const renderSelectedGridPolygon = (feature) => {
+  const renderSelectedGridPolygon = (grid) => {
     const kakaoMap = kakaoMapRef.current;
     if (!kakaoMap || !window.kakao?.maps?.Polygon) return;
 
+    const coords = getGridCoords(grid);
+    if (!coords) return;
+
     selectedGridPolygonRef.current?.setMap(null);
     selectedGridPolygonRef.current = new window.kakao.maps.Polygon({
-      path: feature.geometry.coordinates[0].map(([lng, lat]) => (
+      path: coords.map(([lng, lat]) => (
         new window.kakao.maps.LatLng(lat, lng)
       )),
       strokeWeight: 4,
@@ -217,20 +252,20 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
     selectedGridPolygonRef.current.setMap(kakaoMap);
   };
 
-  const selectGrid = (feature) => {
-    const gridId = String(feature.properties.grid_id);
+  const selectGrid = (grid) => {
+    const gridId = String(grid.grid_id);
     selectedGridIdRef.current = gridId;
-    renderSelectedGridPolygon(feature);
+    renderSelectedGridPolygon(grid);
     setSelectedGridId(gridId);
     setEmailStep(true);
     redraw();
   };
 
   const selectGridAtLatLng = (lat, lng) => {
-    const features = featuresRef.current;
-    if (!features) return;
+    const grids = visibleGridsRef.current;
+    if (!grids.length) return;
 
-    const found = findClickedGrid(features, lng, lat);
+    const found = findClickedGrid(grids, lng, lat);
     if (found) selectGrid(found);
   };
 
@@ -248,25 +283,18 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
         renderCurrentLocation(kakaoMap);
 
         window.kakao.maps.event.addListener(kakaoMap, 'center_changed', redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'dragend',        redraw);
-        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    redraw);
+        window.kakao.maps.event.addListener(kakaoMap, 'zoom_changed',   scheduleVisibleHeatmapRefresh);
+        window.kakao.maps.event.addListener(kakaoMap, 'dragend',        scheduleVisibleHeatmapRefresh);
+        window.kakao.maps.event.addListener(kakaoMap, 'tilesloaded',    scheduleVisibleHeatmapRefresh);
         window.addEventListener('resize', redraw);
 
-        fetch('/seoul_grid.geojson').then(r => r.json()).then((geojson) => {
-          featuresRef.current = geojson.features;
-          redraw();
-        }).catch(e => console.error('[MapPage init]', e));
-
-        Promise.all([
-          fetchHeatmap('now'),
-          fetchHeatmap('1h'),
-          fetchHeatmap('3h'),
-          fetchHeatmap('6h'),
-        ]).then(redraw).catch(e => console.error('[MapPage heatmap init]', e));
+        refreshVisibleHeatmap(kakaoMap).catch(e => console.error('[MapPage heatmap init]', e));
       }
     }, 100);
-    return () => clearInterval(wait);
+    return () => {
+      clearInterval(wait);
+      if (heatmapTimerRef.current) clearTimeout(heatmapTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -287,9 +315,6 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
 
     if (alertMode) {
       const handleClick = (e) => {
-        const features = featuresRef.current;
-        if (!features) return;
-
         selectGridAtLatLng(e.latLng.getLat(), e.latLng.getLng());
       };
 
@@ -316,8 +341,7 @@ const MapPage = ({ userLocation, onNavigateShelter }) => {
   const handleTimeChange = (t) => {
     setSelectedTime(t);
     selectedTimeRef.current = t;
-    setIsLoading(true);
-    setTimeout(() => { redraw(); setIsLoading(false); }, 100);
+    redraw();
   };
 
   const handleShelterClick = (event) => {
